@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SafeGate</string>
+    <string name="title_activity_main">SafeGate</string>
+    <string name="package_name">com.safegate.app</string>
+    <string name="custom_url_scheme">com.safegate.app</string>
+</resources>

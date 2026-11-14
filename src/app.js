@@ -16,134 +16,142 @@ const { strictInputGuard } = require("./middleware/strictInputGuard");
 const healthRoutes       = require("./routes/health.routes");
 const verificationRoutes = require("./routes/verification.routes");
 
-const app = express();
+function createBaseApp(options = {}) {
+  const {
+    attachErrorHandlers = true,
+    mountRootHealth = true,
+    scopeCspToApi = false
+  } = options;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HARDENING: remove Express fingerprint header
-// ─────────────────────────────────────────────────────────────────────────────
-app.disable("x-powered-by");
+  const app = express();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// REQUEST ID + NO-CACHE POLICY
-// Every response carries a UUID and must never be cached by an intermediary.
-// ─────────────────────────────────────────────────────────────────────────────
-app.use(requestIdMiddleware);
+  app.disable("x-powered-by");
+  app.use(requestIdMiddleware);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SECURITY HEADERS (Helmet)
-// Adds: X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security,
-// Content-Security-Policy, Referrer-Policy, etc.
-// ─────────────────────────────────────────────────────────────────────────────
-app.use(helmet({
-  // This API is never embedded in a frame.
-  frameguard: { action: "deny" },
-  // No browser should sniff the content type.
-  noSniff: true,
-  // No content to XSS-filter, but we set it anyway.
-  xssFilter: true,
-  // Hide that this is an Express server.
-  hidePoweredBy: true,
-  // Never leak referrers.
-  referrerPolicy: { policy: "no-referrer" },
-  crossOriginResourcePolicy: { policy: "same-origin" },
-  crossOriginOpenerPolicy: { policy: "same-origin" },
-  // Tight CSP — this is a JSON API, not a web app.
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'none'"],
-      frameAncestors: ["'none'"]
-    }
-  }
-}));
-
-app.use((_req, res, next) => {
-  res.setHeader(
-    "Permissions-Policy",
-    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=()"
-  );
-  next();
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CORS
-// Only allow the local frontend origin set at startup.
-// Native Android / command-line callers send no Origin header — that's fine.
-// ─────────────────────────────────────────────────────────────────────────────
-app.use(cors({
-  origin: (origin, callback) => {
-    // No origin = native app or CLI tool — always allow.
-    if (!origin) return callback(null, true);
-
-    if (env.frontendOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    const error = new Error("Origin not allowed");
-    error.code  = "CORS_ORIGIN_DENIED";
-    return callback(error);
-  },
-
-  methods:        ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "X-Request-Source"],
-  credentials:    false,
-  maxAge:         600
-}));
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WINDOW RATE LIMITER  (express-rate-limit)
-// Caps the total number of requests per source per time window.
-// ─────────────────────────────────────────────────────────────────────────────
-const windowLimiter = rateLimit({
-  windowMs: env.rateLimitWindowMs,
-  limit:    env.rateLimitMax,
-  standardHeaders: true,
-  legacyHeaders:   false,
-
-  handler: (req, res) => {
-    return res.status(429).json({
-      requestId: req.requestId,
-      error: {
-        code:    "RATE_LIMITED",
-        message: "Too many requests. Please try again later."
+  const apiHelmet = helmet({
+    frameguard: { action: "deny" },
+    noSniff: true,
+    xssFilter: true,
+    hidePoweredBy: true,
+    referrerPolicy: { policy: "no-referrer" },
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin" },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"]
       }
-    });
+    }
+  });
+
+  if (scopeCspToApi) {
+    app.use("/api/v1", apiHelmet);
+    app.use(
+      helmet({
+        frameguard: { action: "deny" },
+        noSniff: true,
+        xssFilter: true,
+        hidePoweredBy: true,
+        referrerPolicy: { policy: "no-referrer" },
+        crossOriginResourcePolicy: { policy: "same-origin" },
+        crossOriginOpenerPolicy: { policy: "same-origin" },
+        contentSecurityPolicy: false
+      })
+    );
+  } else {
+    app.use(apiHelmet);
   }
-});
 
-app.use("/api/v1", windowLimiter);
+  app.use((_req, res, next) => {
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=()"
+    );
+    next();
+  });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BURST GUARD  (token bucket)
-// Prevents rapid-fire URL probing within the rate-limit window.
-// ─────────────────────────────────────────────────────────────────────────────
-app.use("/api/v1/verify", burstGuardMiddleware);
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// REQUEST BODY PARSER
-// Hard limit: 8 KB.  Reject non-JSON content types at this layer.
-// ─────────────────────────────────────────────────────────────────────────────
-app.use(express.json({
-  limit:  "8kb",
-  strict: true
-}));
+        if (env.frontendOrigins.includes(origin)) {
+          return callback(null, true);
+        }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STRICT INPUT GUARD
-// Validates shape, character set, and forbidden patterns before the controller.
-// ─────────────────────────────────────────────────────────────────────────────
-app.use("/api/v1/verify", strictInputGuard);
+        // Allow same-host localhost preview or AI Studio preview origins safely without ever sending credentials.
+        try {
+          const parsed = new URL(origin);
+          if (
+            ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname) ||
+            parsed.protocol === "capacitor:"
+          ) {
+            return callback(null, true);
+          }
+        } catch {
+          // fall through to deny
+        }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ROUTES
-// ─────────────────────────────────────────────────────────────────────────────
-app.use("/api/v1/health", healthRoutes);
-app.use("/api/v1/verify", verificationRoutes);
-app.use("/", healthRoutes);
+        const error = new Error("Origin not allowed");
+        error.code = "CORS_ORIGIN_DENIED";
+        return callback(error);
+      },
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ERROR HANDLERS
-// ─────────────────────────────────────────────────────────────────────────────
-app.use(notFoundHandler);
-app.use(errorHandler);
+      methods: ["GET", "POST", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "X-Request-Source"],
+      credentials: false,
+      maxAge: 600
+    })
+  );
 
-module.exports = app;
+  const windowLimiter = rateLimit({
+    windowMs: env.rateLimitWindowMs,
+    limit: env.rateLimitMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+
+    handler: (req, res) => {
+      return res.status(429).json({
+        requestId: req.requestId,
+        error: {
+          code: "RATE_LIMITED",
+          message: "Too many requests. Please try again later."
+        }
+      });
+    }
+  });
+
+  app.use("/api/v1", windowLimiter);
+  app.use("/api/v1/verify", burstGuardMiddleware);
+
+  app.use(
+    express.json({
+      limit: "8kb",
+      strict: true
+    })
+  );
+
+  app.use("/api/v1/verify", strictInputGuard);
+
+  app.use("/api/v1/health", healthRoutes);
+  app.use("/api/v1/verify", verificationRoutes);
+  app.use("/health", healthRoutes);
+
+  if (mountRootHealth) {
+    app.use("/", healthRoutes);
+  }
+
+  if (attachErrorHandlers) {
+    app.use(notFoundHandler);
+    app.use(errorHandler);
+  }
+
+  return app;
+}
+
+const defaultApp = createBaseApp();
+defaultApp.createBaseApp = createBaseApp;
+defaultApp.notFoundHandler = notFoundHandler;
+defaultApp.errorHandler = errorHandler;
+
+module.exports = defaultApp;

@@ -1,0 +1,10 @@
+{
+	"appId": "com.safegate.app",
+	"appName": "SafeGate",
+	"webDir": "dist",
+	"plugins": {
+		"CapacitorSQLite": {
+			"androidIsEncryption": true
+		}
+	}
+}

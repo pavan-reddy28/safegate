@@ -48,7 +48,7 @@ function mapNativeBlock(record) {
     requestId: record.request_id || null,
     createdAt: record.created_at
       ? new Date(Number(record.created_at)).toISOString()
-      : null,
+      : null
   };
 }
 
@@ -72,6 +72,25 @@ async function getNativeBlockDetails(fingerprint) {
   return mapNativeBlock(result?.values?.[0] || null);
 }
 
+async function listNativeBlocks() {
+  const database = await getNativeDatabase();
+  const result = await database.query(
+    `SELECT
+       fingerprint,
+       reason_codes_json,
+       source,
+       threat_type,
+       request_id,
+       created_at
+     FROM blocked_links
+     ORDER BY created_at DESC
+     LIMIT 50;`
+  );
+  return Array.isArray(result?.values)
+    ? result.values.map(mapNativeBlock).filter(Boolean)
+    : [];
+}
+
 async function persistNativeBlock(fingerprint, details = {}) {
   const database = await getNativeDatabase();
 
@@ -89,7 +108,6 @@ async function persistNativeBlock(fingerprint, details = {}) {
       ? details.threatType
       : null;
 
-  // The schema requires a non-null request_id.
   const requestId =
     typeof details.requestId === "string" && details.requestId.length > 0
       ? details.requestId
@@ -119,7 +137,7 @@ async function persistNativeBlock(fingerprint, details = {}) {
       threatType,
       requestId,
       source,
-      createdAt,
+      createdAt
     ]
   );
 
@@ -142,6 +160,15 @@ async function removeNativeBlock(fingerprint) {
     throw new Error("Could not remove blocked URL fingerprint");
   }
 
+  return true;
+}
+
+async function clearNativeBlocks() {
+  const database = await getNativeDatabase();
+  const result = await database.run("DELETE FROM blocked_links;");
+  if (result?.changes?.changes === -1) {
+    throw new Error("Could not clear blocked URLs");
+  }
   return true;
 }
 
@@ -168,7 +195,7 @@ function openIndexedDatabase() {
 
       if (!database.objectStoreNames.contains(STORE_NAME)) {
         database.createObjectStore(STORE_NAME, {
-          keyPath: "fingerprint",
+          keyPath: "fingerprint"
         });
       }
     };
@@ -214,6 +241,25 @@ async function getIndexedBlockDetails(fingerprint) {
   });
 }
 
+async function listIndexedBlocks() {
+  const database = await openIndexedDatabase();
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readonly");
+    const request = transaction.objectStore(STORE_NAME).getAll();
+
+    request.onsuccess = () => {
+      const rows = Array.isArray(request.result) ? request.result : [];
+      rows.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      resolve(rows.slice(0, 50));
+    };
+
+    request.onerror = () => {
+      reject(new Error("Could not list blocked URLs"));
+    };
+  });
+}
+
 async function persistIndexedBlock(fingerprint, details = {}) {
   const record = {
     fingerprint,
@@ -222,8 +268,9 @@ async function persistIndexedBlock(fingerprint, details = {}) {
       : ["SECURITY_BLOCK"],
     source: details.source || "SAFEGATE",
     threatType: details.threatType || null,
+    originHost: details.originHost || null,
     requestId: details.requestId || "UNKNOWN",
-    createdAt: new Date().toISOString(),
+    createdAt: new Date().toISOString()
   };
 
   const database = await openIndexedDatabase();
@@ -271,6 +318,18 @@ async function removeIndexedBlock(fingerprint) {
   });
 }
 
+async function clearIndexedBlocks() {
+  const database = await openIndexedDatabase();
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).clear();
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = () => reject(new Error("Could not clear blocked URLs"));
+    transaction.onabort = () => reject(new Error("Block clear aborted"));
+  });
+}
+
 /* ---------------- PUBLIC STORAGE API ---------------- */
 
 export async function getBlockDetails(fingerprint) {
@@ -286,6 +345,13 @@ export async function getBlockDetails(fingerprint) {
 export async function isUrlBlocked(fingerprint) {
   const details = await getBlockDetails(fingerprint);
   return Boolean(details);
+}
+
+export async function listBlockedUrls() {
+  if (isAndroid()) {
+    return listNativeBlocks();
+  }
+  return listIndexedBlocks();
 }
 
 export async function persistBlockedUrl(fingerprint, details = {}) {
@@ -306,4 +372,11 @@ export async function removeBlockedUrl(fingerprint) {
   }
 
   return removeIndexedBlock(fingerprint);
+}
+
+export async function clearBlockedUrls() {
+  if (isAndroid()) {
+    return clearNativeBlocks();
+  }
+  return clearIndexedBlocks();
 }

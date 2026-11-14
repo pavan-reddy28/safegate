@@ -1,13 +1,16 @@
 {
-  "name": "frontend",
+  "name": "safegate",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "2.0.0",
+  "description": "100% On-Device Zero-Egress Multi-Layer URL Verification & Android Protection System",
+  "main": "server.ts",
   "scripts": {
-    "dev": "vite",
+    "dev": "tsx server.ts",
+    "start": "tsx server.ts",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "test": "node --test tests/*.test.js",
+    "cap:sync": "npm run build && cap sync android"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^8.1.1",
@@ -15,10 +18,23 @@
     "@capacitor/app": "^8.1.2",
     "@capacitor/browser": "^8.0.5",
     "@capacitor/core": "^8.6.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.4",
+    "helmet": "^8.3.0",
     "ipaddr.js": "^2.5.0",
+    "lucide-react": "^1.73.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "tldts": "^7.4.19"
+    "tailwindcss": "^4.3.5",
+    "tldts": "^7.4.19",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.6.0",

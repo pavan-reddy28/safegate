@@ -23,7 +23,7 @@ const envSchema = z.object({
   FRONTEND_ORIGINS: z
     .string()
     .default(
-      "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173"
+      "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,capacitor://localhost,https://localhost,http://localhost"
     ),
 
   LOCAL_BLOCKED_DOMAINS: z
@@ -99,7 +99,7 @@ for (const origin of frontendOrigins) {
   const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
   const isLocalHost = new Set(["localhost", "127.0.0.1", "::1"]).has(hostname);
 
-  if (!["http:", "https:"].includes(parsed.protocol) || !isLocalHost) {
+  if (!["http:", "https:", "capacitor:"].includes(parsed.protocol) || !isLocalHost) {
     console.error("[SafeGate] Only local frontend origins are allowed.");
     process.exit(1);
   }
