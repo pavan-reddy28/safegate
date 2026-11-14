@@ -1,6 +1,6 @@
 
 import { Capacitor } from "@capacitor/core";
-import { getSafeGateDatabase } from "./sqliteDatabase";
+import { getSafeGateDatabase } from "./sqliteDatabase.js";
 
 const DATABASE_NAME = "safegate-device-security";
 const DATABASE_VERSION = 1;
@@ -336,10 +336,19 @@ export async function getBlockDetails(fingerprint) {
   validateFingerprint(fingerprint);
 
   if (isAndroid()) {
-    return getNativeBlockDetails(fingerprint);
+    try {
+      const nativeMatch = await getNativeBlockDetails(fingerprint);
+      if (nativeMatch) return nativeMatch;
+    } catch {
+      // Fall through to WebView IndexedDB when native SQLite keystore is unavailable.
+    }
   }
 
-  return getIndexedBlockDetails(fingerprint);
+  try {
+    return await getIndexedBlockDetails(fingerprint);
+  } catch {
+    return null;
+  }
 }
 
 export async function isUrlBlocked(fingerprint) {
@@ -349,16 +358,29 @@ export async function isUrlBlocked(fingerprint) {
 
 export async function listBlockedUrls() {
   if (isAndroid()) {
-    return listNativeBlocks();
+    try {
+      return await listNativeBlocks();
+    } catch {
+      // Fall through to IndexedDB
+    }
   }
-  return listIndexedBlocks();
+
+  try {
+    return await listIndexedBlocks();
+  } catch {
+    return [];
+  }
 }
 
 export async function persistBlockedUrl(fingerprint, details = {}) {
   validateFingerprint(fingerprint);
 
   if (isAndroid()) {
-    return persistNativeBlock(fingerprint, details);
+    try {
+      return await persistNativeBlock(fingerprint, details);
+    } catch {
+      // Fall through to IndexedDB
+    }
   }
 
   return persistIndexedBlock(fingerprint, details);
@@ -368,7 +390,11 @@ export async function removeBlockedUrl(fingerprint) {
   validateFingerprint(fingerprint);
 
   if (isAndroid()) {
-    return removeNativeBlock(fingerprint);
+    try {
+      return await removeNativeBlock(fingerprint);
+    } catch {
+      // Fall through to IndexedDB
+    }
   }
 
   return removeIndexedBlock(fingerprint);
@@ -376,7 +402,12 @@ export async function removeBlockedUrl(fingerprint) {
 
 export async function clearBlockedUrls() {
   if (isAndroid()) {
-    return clearNativeBlocks();
+    try {
+      return await clearNativeBlocks();
+    } catch {
+      // Fall through to IndexedDB
+    }
   }
+
   return clearIndexedBlocks();
 }

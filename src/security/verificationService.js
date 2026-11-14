@@ -1,18 +1,18 @@
 import { Capacitor } from "@capacitor/core";
-import { createDeviceUrlFingerprint } from "./urlFingerprint";
-import { analyzeUrlOffline } from "./offlineEngine";
+import { createDeviceUrlFingerprint } from "./urlFingerprint.js";
+import { analyzeUrlOffline } from "./offlineEngine.js";
 import {
   persistBlockedUrl,
   getBlockDetails,
   listBlockedUrls,
   removeBlockedUrl,
   clearBlockedUrls
-} from "./blockStore";
+} from "./blockStore.js";
 
 const isNative = Capacitor.isNativePlatform();
 
 function resolveApiBase() {
-  const configured = import.meta.env.VITE_SAFE_GATE_API_BASE;
+  const configured = import.meta.env?.VITE_SAFE_GATE_API_BASE;
 
   if (configured) {
     try {
@@ -38,8 +38,8 @@ function resolveApiBase() {
     return "";
   }
 
-  // On native Android APK, probe localhost daemon if present, else fallback to on-device engine.
-  return "http://127.0.0.1:3000";
+  // On standalone native Android APK (no VITE_SAFE_GATE_API_BASE), run the on-device 30-layer engine directly.
+  return null;
 }
 
 const API_BASE = resolveApiBase();
@@ -169,6 +169,7 @@ function buildPersistentBlockResponse(details, requestId, originOnly) {
 }
 
 async function persistConfirmedBlock(fingerprint, originHost, result, requestId) {
+  if (!fingerprint) return "SKIPPED";
   try {
     await persistBlockedUrl(fingerprint, {
       requestId,
@@ -191,25 +192,27 @@ export async function verifyDestination(input, options = {}) {
   try {
     fpData = await createDeviceUrlFingerprint(input);
   } catch {
-    return buildHoldResponse(fallbackRequestId, "INVALID_OR_UNSUPPORTED_URL");
+    // Do NOT return HOLD before analyzing — malformed/evasive URLs must still run through Stage 2 so threats are BLOCKED.
+    fpData = null;
   }
 
-  // Stage 1: Check persistent on-device SHA-256 block vault locally.
-  if (!skipVaultCache) {
+  // Stage 1: Best-effort persistent on-device SHA-256 block vault lookup.
+  // Never abort into HOLD if local SQLite/IndexedDB is unavailable.
+  if (!skipVaultCache && fpData?.fingerprint) {
     try {
       const existingBlock = await getBlockDetails(fpData.fingerprint);
       if (existingBlock) {
         return buildPersistentBlockResponse(existingBlock, fallbackRequestId, fpData.originOnly);
       }
     } catch {
-      return buildHoldResponse(fallbackRequestId, "PERSISTENT_SECURITY_STORAGE_UNAVAILABLE");
+      // Ignore storage error and proceed straight to full URL verification.
     }
   }
 
-  // Stage 2: Query local SafeGate verification engine (same-origin Express API or Capacitor offline engine).
+  // Stage 2: Run SafeGate verification engine (same-origin Express API or Capacitor 30-layer on-device engine).
   let result;
 
-  if (VERIFY_ENDPOINT) {
+  if (VERIFY_ENDPOINT !== null) {
     try {
       const response = await fetch(VERIFY_ENDPOINT, {
         method: "POST",
@@ -228,7 +231,7 @@ export async function verifyDestination(input, options = {}) {
       const parsed = await response.json().catch(() => null);
 
       if (!response.ok || !parsed || typeof parsed !== "object") {
-        // Explicit server rejection (e.g. forbidden bidi chars, bad scheme)
+        // Explicit server rejection (e.g. forbidden bidi chars, bad scheme, malformed %)
         if (response.status === 400 && parsed?.error?.code === "FORBIDDEN_URL_CONTENT") {
           const blockedOffline = analyzeUrlOffline(input);
           if (blockedOffline.finalDecision === "BLOCK") {
@@ -237,26 +240,26 @@ export async function verifyDestination(input, options = {}) {
             return buildHoldResponse(parsed?.requestId || fallbackRequestId, parsed.error.code);
           }
         } else {
-          return buildHoldResponse(
-            parsed?.requestId || fallbackRequestId,
-            parsed?.error?.code || "LOCAL_VERIFICATION_FAILED"
-          );
+          result = analyzeUrlOffline(input);
         }
       } else {
         result = parsed;
       }
     } catch {
-      if (isNative) {
-        // Native APK standalone mode without external Node server -> run deterministic on-device ESM analyzer.
-        result = analyzeUrlOffline(input);
-      } else {
-        return buildHoldResponse(fallbackRequestId, "LOCAL_VERIFICATION_SERVICE_UNAVAILABLE");
-      }
+      result = analyzeUrlOffline(input);
     }
   } else if (isNative) {
-    result = analyzeUrlOffline(input);
+    try {
+      result = analyzeUrlOffline(input);
+    } catch {
+      return buildHoldResponse(fallbackRequestId, "LOCAL_OFFLINE_ENGINE_ERROR");
+    }
   } else {
-    return buildHoldResponse(fallbackRequestId, "LOCAL_API_BASE_MUST_BE_LOOPBACK");
+    try {
+      result = analyzeUrlOffline(input);
+    } catch {
+      return buildHoldResponse(fallbackRequestId, "LOCAL_API_BASE_MUST_BE_LOOPBACK");
+    }
   }
 
   if (!result || !ALLOWED_DECISIONS.has(result.finalDecision)) {
@@ -266,8 +269,8 @@ export async function verifyDestination(input, options = {}) {
   // Stage 3: Save only confirmed blocks (fingerprint only, zero sensitive path/query).
   if (result.finalDecision === "BLOCK") {
     const persistenceStatus = await persistConfirmedBlock(
-      fpData.fingerprint,
-      fpData.originOnly,
+      fpData?.fingerprint || null,
+      fpData?.originOnly || null,
       result,
       result.requestId || fallbackRequestId
     );
