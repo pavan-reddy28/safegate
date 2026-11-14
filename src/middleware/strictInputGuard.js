@@ -3,38 +3,65 @@
 /**
  * strictInputGuard.js
  *
- * Final-line input sanitization middleware that runs before any controller.
- *
- * CHECKS PERFORMED
- * ----------------
- * 1. Content-Type must be application/json (no multipart, no form-data).
- * 2. The parsed body must be a plain object — no arrays, strings, numbers.
- * 3. The body must have exactly one key: "url".
- * 4. The url value must be a string.
- * 5. The url string must not contain Unicode null bytes, RTL override
- *    characters, or any C0/C1 control characters.
- * 6. The url string must not start with a dangerous scheme (javascript:,
- *    data:, vbscript:, file:) even when wrapped in whitespace.
- * 7. Length must be between 1 and 4096 bytes.
- *
- * None of the URL data is logged.
+ * Boundary input sanitization middleware running before verification controllers.
+ * Never logs any submitted URL data.
  */
 
 const MAX_URL_BYTES = 4096;
 
 const FORBIDDEN_URL_PATTERNS = [
-  // Dangerous schemes (even with leading whitespace / zero-width chars)
-  /^[\s\u200B-\u200D\uFEFF]*(?:javascript|data|vbscript|file):/i,
+  // Dangerous web & mobile deep-link schemes (even with zero-width / whitespace padding)
+  /^[\s\u200B-\u200D\uFEFF]*(?:javascript|data|vbscript|file|intent|upi|tel|sms|smsto|mmsto|market|blob|filesystem|about|view-source):/i,
 
-  // Null bytes
-  /\x00/,
+  // Null bytes (raw or percent-encoded)
+  /\x00|%00/i,
 
-  // RTL / bidi override characters that can disguise URLs
+  // RTL / bidi override & zero-width spoofing characters (raw or UTF-8 percent-encoded)
   /[\u202A-\u202E\u2066-\u2069\u200F\u061C]/,
+  /%e2%80%(?:8[b-f]|a[a-e])|%e2%81%a[6-9]|%ef%bb%bf/i,
 
   // C1 control characters
   /[\x80-\x9F]/
 ];
+
+function validateUrlString(req, res, url) {
+  if (typeof url !== "string") {
+    res.status(400).json({
+      requestId: req.requestId,
+      error: {
+        code: "INVALID_URL_TYPE",
+        message: "\"url\" must be a string."
+      }
+    });
+    return false;
+  }
+
+  if (url.length === 0 || Buffer.byteLength(url, "utf8") > MAX_URL_BYTES) {
+    res.status(400).json({
+      requestId: req.requestId,
+      error: {
+        code: "URL_LENGTH_OUT_OF_RANGE",
+        message: `"url" must be between 1 and ${MAX_URL_BYTES} bytes.`
+      }
+    });
+    return false;
+  }
+
+  for (const pattern of FORBIDDEN_URL_PATTERNS) {
+    if (pattern.test(url)) {
+      res.status(400).json({
+        requestId: req.requestId,
+        error: {
+          code: "FORBIDDEN_URL_CONTENT",
+          message: "The submitted value contains forbidden characters or patterns."
+        }
+      });
+      return false;
+    }
+  }
+
+  return true;
+}
 
 function strictInputGuard(req, res, next) {
   const contentType = (req.headers["content-type"] || "").toLowerCase();
@@ -51,11 +78,7 @@ function strictInputGuard(req, res, next) {
 
   const body = req.body;
 
-  if (
-    !body ||
-    typeof body !== "object" ||
-    Array.isArray(body)
-  ) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
     return res.status(400).json({
       requestId: req.requestId,
       error: {
@@ -67,6 +90,40 @@ function strictInputGuard(req, res, next) {
 
   const keys = Object.keys(body);
 
+  // /authorize-redirect accepts { url, verificationToken, userConfirmedWarning? }
+  if (req.path === "/authorize-redirect") {
+    const allowedKeys = new Set(["url", "verificationToken", "userConfirmedWarning"]);
+    if (
+      !Object.prototype.hasOwnProperty.call(body, "url") ||
+      !Object.prototype.hasOwnProperty.call(body, "verificationToken") ||
+      keys.some((k) => !allowedKeys.has(k))
+    ) {
+      return res.status(400).json({
+        requestId: req.requestId,
+        error: {
+          code: "INVALID_REQUEST_SHAPE",
+          message: "Provide \"url\" and \"verificationToken\"."
+        }
+      });
+    }
+
+    if (!validateUrlString(req, res, body.url)) {
+      return;
+    }
+
+    if (typeof body.verificationToken !== "string" || body.verificationToken.length > 1024) {
+      return res.status(400).json({
+        requestId: req.requestId,
+        error: {
+          code: "INVALID_VERIFICATION_TOKEN",
+          message: "Provide a valid verificationToken string."
+        }
+      });
+    }
+
+    return next();
+  }
+
   if (keys.length !== 1 || keys[0] !== "url") {
     return res.status(400).json({
       requestId: req.requestId,
@@ -77,38 +134,8 @@ function strictInputGuard(req, res, next) {
     });
   }
 
-  const url = body.url;
-
-  if (typeof url !== "string") {
-    return res.status(400).json({
-      requestId: req.requestId,
-      error: {
-        code: "INVALID_URL_TYPE",
-        message: "\"url\" must be a string."
-      }
-    });
-  }
-
-  if (url.length === 0 || url.length > MAX_URL_BYTES) {
-    return res.status(400).json({
-      requestId: req.requestId,
-      error: {
-        code: "URL_LENGTH_OUT_OF_RANGE",
-        message: `"url" must be between 1 and ${MAX_URL_BYTES} characters.`
-      }
-    });
-  }
-
-  for (const pattern of FORBIDDEN_URL_PATTERNS) {
-    if (pattern.test(url)) {
-      return res.status(400).json({
-        requestId: req.requestId,
-        error: {
-          code: "FORBIDDEN_URL_CONTENT",
-          message: "The submitted value contains forbidden characters or patterns."
-        }
-      });
-    }
+  if (!validateUrlString(req, res, body.url)) {
+    return;
   }
 
   next();

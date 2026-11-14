@@ -8,6 +8,8 @@
   "main": "src/server.js",
   "scripts": {
     "test": "node --test",
+    "build": "node -e \"const fs=require('fs'),cp=require('child_process');const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(d+'/'+e.name):e.name.endsWith('.js')?[d+'/'+e.name]:[]);for(const f of walk('src'))cp.execFileSync(process.execPath,['--check',f],{stdio:'inherit'});\"",
+    "lint": "node -e \"const fs=require('fs'),cp=require('child_process');const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(d+'/'+e.name):e.name.endsWith('.js')?[d+'/'+e.name]:[]);for(const f of [...walk('src'),...walk('tests')])cp.execFileSync(process.execPath,['--check',f],{stdio:'inherit'});\"",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js"
   },

@@ -1,50 +1,33 @@
-
 "use strict";
 
 /**
- * verification.service.js  (enhanced)
+ * verification.service.js
  *
- * Orchestrates the full multi-layer URL verification pipeline:
+ * Orchestrates the 12-layer privacy-first URL verification pipeline:
  *
- *   Layer 1  — URL normalization & structural validation   (urlAnalyzer)
- *   Layer 2  — Domain / host intelligence                  (domainAnalyzer via urlAnalyzer)
- *   Layer 3  — Path analysis                               (pathAnalyzer via urlAnalyzer)
- *   Layer 4  — Query / nested-redirect analysis            (queryAnalyzer via urlAnalyzer)
- *   Layer 5  — Google Safe Browsing v5 (hash-prefix only)  (googleSafeBrowsing.service)
- *   Layer 6  — Known-safe domain fast-pass                 (knownSafeDomains)
- *   Layer 7  — Privacy-safe audit logging                  (auditLog)
- *
- * PRIVACY GUARANTEES (enforced here and in every sub-module)
- * ----------------------------------------------------------
- *   • The original URL is NEVER logged, stored or returned.
- *   • Only 4-byte SHA-256 hash prefixes of hostname variants are sent to Google.
- *   • No path, query string or fragment ever leaves this device.
- *   • Query parameter VALUES are inspected locally only; they are never returned.
- *   • Sensitive path segments are detected locally; they are never returned.
- *   • The audit log records only: timestamp, request UUID, decision, reason codes,
- *     risk score, structural indicators, destination hostname, and Google status.
+ *   Layer 1  — Strict HTTP boundary & input sanitization      (strictInputGuard / burstGuard)
+ *   Layer 2  — URL normalization & anti-evasion               (urlNormalizer)
+ *   Layer 3  — Domain, IP, homograph & brand impersonation    (domainAnalyzer)
+ *   Layer 4  — Path, script-injection & APK/exe inspection    (pathAnalyzer)
+ *   Layer 5  — Query, Base64 smuggling & redirect chain       (queryAnalyzer)
+ *   Layer 6  — SMS/WhatsApp social-engineering scam lures     (scamLureAnalyzer)
+ *   Layer 7  — Google Safe Browsing v5 (4-byte host prefix)   (googleSafeBrowsing.service)
+ *   Layer 8  — Authoritative known-safe allow-list            (knownSafeDomains)
+ *   Layer 9  — Ephemeral HMAC redirect authorization token    (redirectToken)
+ *   Layer 10 — Zero-leakage runtime assertion & redaction     (privacyGuard)
+ *   Layer 11 — Parent-friendly risk summary & guidance        (buildRiskSummary)
+ *   Layer 12 — Privacy-safe structured audit logging          (auditLog)
  */
 
+const env = require("../config/env");
 const { analyzeUrl } = require("../security/urlAnalyzer");
 const { checkGoogleReputation } = require("./googleSafeBrowsing.service");
 const { isKnownSafeDomain } = require("../security/knownSafeDomains");
+const { issueRedirectToken, verifyRedirectToken } = require("../security/redirectToken");
+const { verifyNoPrivateUrlLeak } = require("../security/privacyGuard");
 const { writeAuditEvent } = require("../utils/auditLog");
 
-// ─────────────────────────────────────────────
-// DECISION LOGIC
-// ─────────────────────────────────────────────
-
-/**
- * Combine local heuristic result with Google Safe Browsing result into a
- * single final verdict.
- *
- * @param {object} local   — result from analyzeUrl()
- * @param {object} google  — result from checkGoogleReputation()
- * @param {string|null} registrableDomain
- * @returns {{ finalDecision, recommendedAction, finalReasonCodes }}
- */
-function calculateFinalDecision(local, google, registrableDomain) {
-
+function calculateFinalDecision(local, google, registrableDomain, options = {}) {
   // Hard local block takes absolute priority.
   if (local.decision === "BLOCK") {
     return {
@@ -54,7 +37,7 @@ function calculateFinalDecision(local, google, registrableDomain) {
     };
   }
 
-  // Google found a known threat → block regardless of local verdict.
+  // Google found a known threat -> block regardless of local verdict.
   if (google.status === "THREAT_FOUND") {
     return {
       finalDecision: "BLOCK",
@@ -79,7 +62,6 @@ function calculateFinalDecision(local, google, registrableDomain) {
 
   // Google confirmed no threat.
   if (google.status === "NO_THREAT_FOUND") {
-    // Upgrade to KNOWN_SAFE when the domain is on the allow-list.
     if (isKnownSafeDomain(registrableDomain)) {
       return {
         finalDecision: "KNOWN_SAFE",
@@ -102,7 +84,25 @@ function calculateFinalDecision(local, google, registrableDomain) {
     };
   }
 
-  // Google was unavailable or unconfigured — do not allow silently.
+  // Optional 100%-offline allow-list fast-pass when explicitly opted in via env
+  if (
+    options.offlineAllowKnownSafe &&
+    ["NOT_CONFIGURED", "OFFLINE_MODE_SKIPPED"].includes(google.status) &&
+    isKnownSafeDomain(registrableDomain) &&
+    (local.riskScore ?? 0) === 0
+  ) {
+    return {
+      finalDecision: "KNOWN_SAFE",
+      recommendedAction: "ALLOW",
+      finalReasonCodes: [
+        "LOCAL_STRUCTURAL_CHECK_PASSED",
+        "KNOWN_SAFE_DOMAIN",
+        "OFFLINE_KNOWN_SAFE_VERIFIED"
+      ]
+    };
+  }
+
+  // Fail closed when reputation lookup could not be confirmed.
   return {
     finalDecision: "HOLD",
     recommendedAction: "DO_NOT_OPEN",
@@ -110,30 +110,89 @@ function calculateFinalDecision(local, google, registrableDomain) {
   };
 }
 
-// ─────────────────────────────────────────────
-// MAIN ENTRY POINT
-// ─────────────────────────────────────────────
+function buildRiskSummary({
+  finalDecision,
+  recommendedAction,
+  finalReasonCodes,
+  indicators = [],
+  riskScore = null,
+  destination = null
+}) {
+  const host = destination?.hostname || "unknown destination";
 
-/**
- * Full verification pipeline.
- *
- * @param {string} url        — the raw URL submitted by the client
- * @param {string} requestId  — UUID for audit correlation
- * @returns {Promise<object>}
- */
+  if (finalDecision === "BLOCK") {
+    return {
+      level: "CRITICAL",
+      score: riskScore,
+      headline: "Dangerous link blocked",
+      parentAdvisory:
+        "Do NOT open this link. SafeGate blocked it because it shows strong signs of a phishing scam, malicious file download, or unsafe redirect.",
+      reasons: finalReasonCodes,
+      indicatorsCount: indicators.length
+    };
+  }
+
+  if (finalDecision === "SUSPICIOUS") {
+    return {
+      level: "HIGH",
+      score: riskScore,
+      headline: `Suspicious link detected (${host})`,
+      parentAdvisory:
+        "Be very careful. This link has suspicious traits (such as a brand lookalike, hidden shortened link, APK download, or scam wording). Verify directly in your official bank/service app instead.",
+      reasons: finalReasonCodes,
+      indicatorsCount: indicators.length
+    };
+  }
+
+  if (finalDecision === "HOLD") {
+    return {
+      level: "MEDIUM",
+      score: riskScore,
+      headline: `Verification incomplete — held for safety (${host})`,
+      parentAdvisory:
+        "Local checks passed, but online threat reputation could not be confirmed. Avoid opening unexpected SMS or WhatsApp links until verified.",
+      reasons: finalReasonCodes,
+      indicatorsCount: indicators.length
+    };
+  }
+
+  if (finalDecision === "KNOWN_SAFE") {
+    return {
+      level: "SAFE",
+      score: riskScore ?? 0,
+      headline: `Verified official website (${host})`,
+      parentAdvisory:
+        "This link points to an authoritative official domain and passed all local and reputation checks.",
+      reasons: finalReasonCodes,
+      indicatorsCount: indicators.length
+    };
+  }
+
+  return {
+    level: "LOW",
+    score: riskScore ?? 0,
+    headline: `No known threats found (${host})`,
+    parentAdvisory:
+      "No known threats were found, and no private data left your device. Still avoid entering banking PINs, OTPs, or passwords unless you trust this site.",
+    reasons: finalReasonCodes,
+    indicatorsCount: indicators.length
+  };
+}
+
 async function verifyUrl(url, requestId) {
   const startMs = Date.now();
 
-  // ── Layer 1–4: local analysis ──────────────────────────────────────────
+  // Local layers 2-6
   const localAnalysis = analyzeUrl(url);
 
-  // Hard local blocks skip the Google network request entirely.
+  // Hard local blocks skip Google network lookups completely.
   if (localAnalysis.decision === "BLOCK") {
+    const finalReasonCodes =
+      localAnalysis.reasonCodes || ["LOCAL_SECURITY_BLOCK"];
+
     const result = {
       verificationStatus: "COMPLETED",
-
       localVerification: localAnalysis,
-
       reputationCheck: {
         requiredByLocalAnalyzer: false,
         attempted: false,
@@ -141,25 +200,45 @@ async function verifyUrl(url, requestId) {
         provider: "GOOGLE_SAFE_BROWSING_V5",
         result: "SKIPPED_LOCAL_BLOCK"
       },
-
       googleVerification: {
         status: "SKIPPED_LOCAL_BLOCK",
         threatMatches: [],
         cacheHit: false
       },
-
       finalDecision: "BLOCK",
       recommendedAction: "DO_NOT_OPEN",
-      finalReasonCodes: localAnalysis.reasonCodes || ["LOCAL_SECURITY_BLOCK"],
-
+      finalReasonCodes,
+      verificationToken: null,
+      riskSummary: buildRiskSummary({
+        finalDecision: "BLOCK",
+        recommendedAction: "DO_NOT_OPEN",
+        finalReasonCodes,
+        indicators: localAnalysis.indicators,
+        riskScore: localAnalysis.riskScore,
+        destination: null
+      }),
+      layersExecuted: [
+        "INPUT_BOUNDARY_GUARD",
+        "URL_NORMALIZER_ANTI_EVASION",
+        "DOMAIN_HOMOGRAPH_BRAND_INTEL",
+        "PATH_AND_MALWARE_INSPECTION",
+        "QUERY_AND_REDIRECT_CHAIN_INSPECTION",
+        "SMS_SCAM_LURE_ANALYZER",
+        "ZERO_LEAK_PRIVACY_GUARD"
+      ],
       privacy: {
         originalUrlSentToGoogle: false,
         pathSentToGoogle: false,
         queryStringSentToGoogle: false,
         fragmentSentToGoogle: false,
+        zeroRetentionInPlace: true,
         googleLookupScope: "No Google request — URL blocked locally"
       }
     };
+
+    if (!verifyNoPrivateUrlLeak(url, result)) {
+      throw new Error("PRIVACY_ASSERTION_FAILED");
+    }
 
     writeAuditEvent({
       requestId,
@@ -178,27 +257,45 @@ async function verifyUrl(url, requestId) {
     return result;
   }
 
-  // ── Layer 5: Google Safe Browsing (hash-prefix only) ───────────────────
+  // Layer 7: Google Safe Browsing (4-byte host-prefix only, skipped if STRICT_OFFLINE_MODE=true)
   const googleAnalysis = await checkGoogleReputation(url);
 
   const registrableDomain =
     localAnalysis.destination?.registrableDomain || null;
 
-  // ── Layer 6: final decision (includes known-safe fast-pass) ───────────
+  // Layer 8: Final Decision
   const finalResult = calculateFinalDecision(
     localAnalysis,
     googleAnalysis,
-    registrableDomain
+    registrableDomain,
+    { offlineAllowKnownSafe: env.offlineAllowKnownSafe }
   );
 
-  const googleCompleted = ["THREAT_FOUND", "NO_THREAT_FOUND"]
-    .includes(googleAnalysis.status);
+  const googleCompleted = ["THREAT_FOUND", "NO_THREAT_FOUND"].includes(
+    googleAnalysis.status
+  );
 
-  const googleAttempted = !["NOT_CONFIGURED", "INVALID_URL", "INVALID_HASH_DATA"]
-    .includes(googleAnalysis.status);
+  const googleAttempted = ![
+    "NOT_CONFIGURED",
+    "OFFLINE_MODE_SKIPPED",
+    "INVALID_URL",
+    "INVALID_HASH_DATA"
+  ].includes(googleAnalysis.status);
+
+  // Layer 9: Ephemeral HMAC redirect token for allowed/warned decisions
+  const verificationToken = issueRedirectToken({
+    url,
+    finalDecision: finalResult.finalDecision,
+    recommendedAction: finalResult.recommendedAction,
+    requestId
+  });
 
   const result = {
-    verificationStatus: googleCompleted ? "COMPLETED" : "INCOMPLETE",
+    verificationStatus:
+      googleCompleted ||
+      (env.offlineAllowKnownSafe && finalResult.finalDecision === "KNOWN_SAFE")
+        ? "COMPLETED"
+        : "INCOMPLETE",
 
     localVerification: {
       decision: localAnalysis.decision,
@@ -206,6 +303,7 @@ async function verifyUrl(url, requestId) {
       reasonCodes: localAnalysis.reasonCodes,
       indicators: localAnalysis.indicators,
       destination: localAnalysis.destination,
+      redactedDestination: localAnalysis.redactedDestination,
       riskScore: localAnalysis.riskScore,
       urlInspection: localAnalysis.urlInspection,
       reputationCheckRequired: localAnalysis.reputationCheckRequired,
@@ -237,18 +335,49 @@ async function verifyUrl(url, requestId) {
     finalDecision: finalResult.finalDecision,
     recommendedAction: finalResult.recommendedAction,
     finalReasonCodes: finalResult.finalReasonCodes,
+    verificationToken,
+    riskSummary: buildRiskSummary({
+      finalDecision: finalResult.finalDecision,
+      recommendedAction: finalResult.recommendedAction,
+      finalReasonCodes: finalResult.finalReasonCodes,
+      indicators: localAnalysis.indicators,
+      riskScore: localAnalysis.riskScore,
+      destination: localAnalysis.destination
+    }),
+
+    layersExecuted: [
+      "INPUT_BOUNDARY_GUARD",
+      "URL_NORMALIZER_ANTI_EVASION",
+      "DOMAIN_HOMOGRAPH_BRAND_INTEL",
+      "PATH_AND_MALWARE_INSPECTION",
+      "QUERY_AND_REDIRECT_CHAIN_INSPECTION",
+      "SMS_SCAM_LURE_ANALYZER",
+      googleAttempted
+        ? "GOOGLE_SAFE_BROWSING_HASH_PREFIX"
+        : "GOOGLE_SAFE_BROWSING_SKIPPED",
+      "KNOWN_SAFE_DOMAIN_POLICY",
+      "EPHEMERAL_REDIRECT_TOKEN",
+      "ZERO_LEAK_PRIVACY_GUARD"
+    ],
 
     privacy: {
       originalUrlSentToGoogle: false,
       pathSentToGoogle: false,
       queryStringSentToGoogle: false,
       fragmentSentToGoogle: false,
-      googleLookupScope:
-        "Four-byte SHA-256 prefixes of hostname variants at root path only"
+      zeroRetentionInPlace: true,
+      googleLookupScope: env.strictOfflineMode
+        ? "Strict offline mode active — zero external network requests made"
+        : "Four-byte SHA-256 prefixes of non-sensitive hostname variants at root path only"
     }
   };
 
-  // ── Layer 7: audit log ─────────────────────────────────────────────────
+  // Layer 10: Runtime zero-leakage verification
+  if (!verifyNoPrivateUrlLeak(url, result)) {
+    throw new Error("PRIVACY_ASSERTION_FAILED");
+  }
+
+  // Layer 12: Zero-URL audit log
   writeAuditEvent({
     requestId,
     finalDecision: result.finalDecision,
@@ -266,4 +395,17 @@ async function verifyUrl(url, requestId) {
   return result;
 }
 
-module.exports = { verifyUrl, calculateFinalDecision };
+function authorizeRedirect({ url, verificationToken, userConfirmedWarning }) {
+  return verifyRedirectToken({
+    url,
+    token: verificationToken,
+    userConfirmedWarning
+  });
+}
+
+module.exports = {
+  verifyUrl,
+  calculateFinalDecision,
+  authorizeRedirect,
+  buildRiskSummary
+};

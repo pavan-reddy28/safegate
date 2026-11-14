@@ -3,14 +3,19 @@
 /**
  * pathAnalyzer.js
  *
- * Structural analysis of URL path segments.
- * No path content is ever returned in API responses.
+ * Deep local structural inspection of URL path segments.
+ * No path content is ever returned or logged.
  */
 
+// Mobile sideload / installer packages — extremely high risk when delivered via SMS
+const MOBILE_INSTALLER_EXTENSIONS = new Set([
+  "apk", "aab", "xapk", "apks", "ipa"
+]);
+
 const EXECUTABLE_EXTENSIONS = new Set([
-  "exe", "msi", "apk", "aab", "bat", "cmd", "com",
-  "scr", "ps1", "sh", "jar", "vbs", "dmg", "pkg",
-  "deb", "rpm", "iso", "pif", "app", "ipa"
+  "exe", "msi", "apk", "aab", "xapk", "apks", "bat", "cmd", "com",
+  "scr", "ps1", "sh", "jar", "vbs", "hta", "dmg", "pkg",
+  "deb", "rpm", "iso", "pif", "app", "ipa", "lnk"
 ]);
 
 function labelEntropy(value) {
@@ -52,9 +57,9 @@ const SECRET_ROUTE_WORDS = new Set([
 
 function isSensitivePathSegment(segment, previousSegment = "") {
   const decoded = decodeRepeatedly(String(segment || ""), 3);
-  const value   = decoded.value;
-  const lower   = value.toLowerCase();
-  const prev    = String(previousSegment || "").toLowerCase();
+  const value = decoded.value;
+  const lower = value.toLowerCase();
+  const prev = String(previousSegment || "").toLowerCase();
 
   // JWT pattern
   if (/^eyj[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}$/i.test(value)) return true;
@@ -75,16 +80,17 @@ function isSensitivePathSegment(segment, previousSegment = "") {
 }
 
 /**
- * Analyze a URL path for structural risk indicators.
+ * Analyze a URL path for structural and malware-delivery risk indicators.
  *
- * @param {string} rawPath      — raw (percent-encoded) path from URL
- * @param {string} [pathname]   — parsed pathname (decoded by URL parser) — unused, kept for signature compat
+ * @param {string} rawPath
+ * @param {string} [_pathname]
  * @returns {object}
  */
 function analyzePath(rawPath, _pathname) {
   const indicators = [];
-  let riskScore    = 0;
-  let hardBlock    = false;
+  let riskScore = 0;
+  let hardBlock = false;
+  let hardBlockReason = null;
 
   const decoded = decodeRepeatedly(rawPath, 2);
   const decodedPath = decoded.value;
@@ -100,10 +106,19 @@ function analyzePath(rawPath, _pathname) {
   }
 
   // Encoded null / LF / CR / TAB — hard block
-  if (/%(?:00|0a|0d|09)/i.test(decodedPath)) {
+  if (/%(?:00|0a|0d|09)/i.test(rawPath) || /%(?:00|0a|0d|09)/i.test(decodedPath) || /[\u0000-\u001F\u007F]/.test(decodedPath)) {
     indicators.push("ENCODED_CONTROL_CHARACTER");
     riskScore += 5;
     hardBlock = true;
+    hardBlockReason = "ENCODED_CONTROL_CHARACTER";
+  }
+
+  // Encoded XSS / HTML script injection in path
+  if (/<script\b|javascript:|onerror\s*=|onload\s*=/i.test(decodedPath)) {
+    indicators.push("INJECTED_SCRIPT_IN_PATH");
+    riskScore += 6;
+    hardBlock = true;
+    hardBlockReason = hardBlockReason || "INJECTED_SCRIPT_IN_PATH";
   }
 
   // Path traversal
@@ -142,23 +157,29 @@ function analyzePath(rawPath, _pathname) {
     indicators.push("SENSITIVE_PATH_SEGMENT_DETECTED");
   }
 
-  const finalSegment   = segments.at(-1) || "";
+  const finalSegment = segments.at(-1) || "";
   const extensionMatch = finalSegment.match(/\.([a-z0-9]{1,10})$/i);
-  const extension      = extensionMatch ? extensionMatch[1].toLowerCase() : null;
+  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : null;
 
-  if (extension && EXECUTABLE_EXTENSIONS.has(extension)) {
+  if (extension && MOBILE_INSTALLER_EXTENSIONS.has(extension)) {
+    indicators.push("MOBILE_SIDELOAD_INSTALLER_PATH");
+    indicators.push("EXECUTABLE_DOWNLOAD_PATH");
+    riskScore += 5;
+  } else if (extension && EXECUTABLE_EXTENSIONS.has(extension)) {
     indicators.push("EXECUTABLE_DOWNLOAD_PATH");
     riskScore += 2;
   }
 
   return {
-    indicators:               [...new Set(indicators)],
+    indicators: [...new Set(indicators)],
     riskScore,
     hardBlock,
-    segmentCount:             segments.length,
+    hardBlockReason,
+    segmentCount: segments.length,
     extension,
-    originalPathLength:       rawPath.length,
-    sensitivePathSegmentCount
+    originalPathLength: rawPath.length,
+    sensitivePathSegmentCount,
+    segments // kept strictly in memory for local scamLureAnalyzer; never returned in API responses
   };
 }
 

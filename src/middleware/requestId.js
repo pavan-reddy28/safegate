@@ -1,17 +1,19 @@
-const {
-    randomUUID
-} = require("node:crypto");
+"use strict";
+
+const { randomUUID } = require("node:crypto");
 
 function requestIdMiddleware(req, res, next) {
+  req.requestId = randomUUID();
 
-    req.requestId = randomUUID();
+  // Security-sensitive verification responses must never be cached or leak referrers.
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Referrer-Policy", "no-referrer");
 
-    // Security-sensitive responses must not be cached.
-    res.setHeader("Cache-Control", "no-store");
-
-    next();
+  next();
 }
 
 module.exports = {
-    requestIdMiddleware
+  requestIdMiddleware
 };

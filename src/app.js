@@ -43,6 +43,9 @@ app.use(helmet({
   xssFilter: true,
   // Hide that this is an Express server.
   hidePoweredBy: true,
+  // Never leak referrers.
+  referrerPolicy: { policy: "no-referrer" },
+  crossOriginResourcePolicy: { policy: "same-origin" },
   // Tight CSP — this is a JSON API, not a web app.
   contentSecurityPolicy: {
     directives: {
@@ -126,6 +129,7 @@ app.use("/api/v1/verify", strictInputGuard);
 // ─────────────────────────────────────────────────────────────────────────────
 app.use("/api/v1/health", healthRoutes);
 app.use("/api/v1/verify", verificationRoutes);
+app.use("/", healthRoutes);
 
 // The raw client-supplied hash relay is intentionally disabled.
 // Do not mount googleHashRelay.routes here.

@@ -1,14 +1,14 @@
-
 "use strict";
 
+const { analyzeDomain } = require("./domainAnalyzer");
 const { isBlockedHost } = require("./localThreatList");
 
 const REDIRECT_PARAMETERS = new Set([
   "url", "uri", "u", "redirect", "redirecturl", "redirecturi",
   "redirectto", "return", "returnto", "returnurl", "next", "nexturl",
   "continue", "dest", "destination", "target", "goto", "callback",
-  "forward", "redirecturi", "postlogoutredirecturi", "logouturi",
-  "canceluri", "continueurl"
+  "forward", "postlogoutredirecturi", "logouturi",
+  "canceluri", "continueurl", "link", "href"
 ]);
 
 const SENSITIVE_PARAMETERS = new Set([
@@ -16,12 +16,15 @@ const SENSITIVE_PARAMETERS = new Set([
   "refreshtoken", "idtoken", "auth", "authorization", "secret",
   "clientsecret", "code", "state", "session", "sessionid", "sid",
   "jwt", "apikey", "signature", "sig", "otp", "pin", "email",
-  "phone", "mobile", "account", "card", "ssn", "dob", "username",
-  "credential", "credentials", "samlrequest", "samlresponse",
-  "assertion", "ticket", "nonce", "csrf", "xsrf", "cookie"
+  "phone", "mobile", "account", "card", "cc", "ssn", "dob", "username",
+  "user", "credential", "credentials", "samlrequest", "samlresponse",
+  "assertion", "ticket", "nonce", "csrf", "xsrf", "cookie",
+  "pan", "aadhaar", "aadhar", "upi", "pa", "cvv"
 ]);
 
-const DANGEROUS_SCHEME = /^(?:javascript|data|vbscript|file):/i;
+// Includes mobile & payment deep-link schemes abused in SMS scams (upi://pay, intent://, etc.)
+const DANGEROUS_SCHEME =
+  /^(?:javascript|data|vbscript|file|intent|upi|tel|sms|smsto|mmsto|market|blob|filesystem|about|view-source):/i;
 
 function normalizeKey(key) {
   return String(key || "")
@@ -36,9 +39,7 @@ function decodeRepeatedly(value, maximumPasses = 2) {
   for (let index = 0; index < maximumPasses; index++) {
     try {
       const decoded = decodeURIComponent(current);
-
       if (decoded === current) break;
-
       current = decoded;
       additionalDecodes++;
     } catch {
@@ -55,6 +56,30 @@ function decodeRepeatedly(value, maximumPasses = 2) {
     decodingFailed: false,
     additionalDecodes
   };
+}
+
+/**
+ * Safely check if a query value is Base64-encoded and hides a URL or dangerous scheme.
+ * Never returns or logs the decoded value.
+ */
+function tryDecodeBase64Redirect(value) {
+  const trimmed = String(value || "").trim();
+  if (trimmed.length < 12 || trimmed.length > 2048) return null;
+  if (!/^[A-Za-z0-9+/_-]{12,}={0,2}$/.test(trimmed)) return null;
+
+  try {
+    const normalized = trimmed.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = Buffer.from(normalized, "base64").toString("utf8").trim();
+    if (
+      /^(?:https?:\/\/|\/\/)/i.test(decoded) ||
+      DANGEROUS_SCHEME.test(decoded.replace(/[\u0000-\u0020\u007f]/g, ""))
+    ) {
+      return decoded;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function parseNestedHttpUrl(value) {
@@ -90,8 +115,7 @@ function parseNestedHttpUrl(value) {
 function inspectRedirectCandidate(candidate, state, depth = 0) {
   const value = String(candidate || "").trim();
 
-  // Some browser parsers ignore ASCII control characters around
-  // or inside a URL scheme. Remove them for scheme inspection.
+  // Strip ASCII control/whitespace before probing scheme to catch parser evasion.
   const schemeProbe = value.replace(/[\u0000-\u0020\u007f]/g, "");
 
   if (DANGEROUS_SCHEME.test(schemeProbe)) {
@@ -100,8 +124,15 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
     return;
   }
 
-  const nested = parseNestedHttpUrl(value);
+  const base64Target = tryDecodeBase64Redirect(value);
+  if (base64Target) {
+    state.indicators.push("BASE64_SMUGGLED_REDIRECT");
+    state.riskScore += 2;
+    inspectRedirectCandidate(base64Target, state, depth + 1);
+    return;
+  }
 
+  const nested = parseNestedHttpUrl(value);
   if (!nested) return;
 
   if (nested.invalid) {
@@ -121,17 +152,28 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
   if (isBlockedHost(nested.hostname)) {
     state.indicators.push("NESTED_REDIRECT_MATCHES_LOCAL_BLOCKLIST");
     state.blockedNestedDestinationCount++;
-    state.hardBlockReason =
-      "NESTED_REDIRECT_MATCHES_LOCAL_BLOCKLIST";
+    state.hardBlockReason = "NESTED_REDIRECT_MATCHES_LOCAL_BLOCKLIST";
     return;
   }
 
-  // Cross-site callbacks are normal in OAuth, SSO and payments.
-  // Their presence alone is never a phishing score.
+  // Run full local domain analysis on the nested redirect target
+  const nestedDomainAnalysis = analyzeDomain(nested.hostname, nested.parsedUrl);
+
+  if (nestedDomainAnalysis.blocked) {
+    state.indicators.push("NESTED_REDIRECT_DESTINATION_BLOCKED");
+    state.blockedNestedDestinationCount++;
+    state.hardBlockReason = nestedDomainAnalysis.reasonCode;
+    return;
+  }
+
+  // Inherit high-risk nested domain signals (e.g., brand impersonation or tunnel host inside redirect)
+  if (nestedDomainAnalysis.riskScore >= 4) {
+    state.indicators.push("SUSPICIOUS_NESTED_REDIRECT_DOMAIN");
+    state.riskScore += nestedDomainAnalysis.riskScore;
+  }
+
   state.indicators.push("NESTED_REDIRECT_DESTINATION_INSPECTED");
 
-  // Inspect nested redirect chains up to three levels.
-  // All parsing takes place locally. URL values are never returned.
   if (depth >= 3) {
     if ([...nested.parsedUrl.searchParams.keys()].length > 0) {
       state.indicators.push("REDIRECT_CHAIN_DEPTH_LIMIT_REACHED");
@@ -141,9 +183,7 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
   }
 
   const identity = nested.parsedUrl.href;
-
   if (state.seenNested.has(identity)) return;
-
   state.seenNested.add(identity);
 
   for (const [nestedKey, nestedValue] of nested.parsedUrl.searchParams.entries()) {
@@ -152,7 +192,6 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
     }
 
     const decoded = decodeRepeatedly(nestedValue, 2);
-
     if (decoded.decodingFailed) {
       state.indicators.push("NESTED_REDIRECT_ENCODING_ERROR");
       state.riskScore += 1;
@@ -204,32 +243,40 @@ function analyzeQuery(parsedUrl) {
     if (isSensitive) {
       sensitiveParameterCount++;
       state.indicators.push("SENSITIVE_QUERY_PARAMETER_PRESENT");
+      state.indicators.push("SENSITIVE_QUERY_PARAMETERS_DETECTED");
     }
 
     const decoded = decodeRepeatedly(value, 2);
 
     if (decoded.decodingFailed) {
       state.indicators.push("QUERY_VALUE_ENCODING_ERROR");
-
       if (isRedirect) {
         malformedRedirectCount++;
         state.riskScore += 1;
       }
-
       continue;
     }
 
     if (decoded.additionalDecodes > 0) {
       doubleEncodedValueCount++;
       state.indicators.push("ADDITIONAL_QUERY_ENCODING");
-      // Double encoding alone is not evidence of phishing.
     }
 
     if (isRedirect) {
       inspectRedirectCandidate(decoded.value, state, 0);
-    } else if (DANGEROUS_SCHEME.test(decoded.value.trim())) {
-      // A string in a non-redirect parameter is just data.
-      state.indicators.push("DANGEROUS_SCHEME_TEXT_IN_QUERY_VALUE");
+    } else {
+      const trimmedVal = decoded.value.trim();
+      if (DANGEROUS_SCHEME.test(trimmedVal)) {
+        state.indicators.push("DANGEROUS_SCHEME_TEXT_IN_QUERY_VALUE");
+      } else {
+        // Also inspect base64-smuggled redirect URLs even in non-standard parameter names
+        const smuggled = tryDecodeBase64Redirect(trimmedVal);
+        if (smuggled) {
+          state.indicators.push("BASE64_SMUGGLED_URL_IN_QUERY");
+          state.riskScore += 2;
+          inspectRedirectCandidate(smuggled, state, 1);
+        }
+      }
     }
   }
 
@@ -238,12 +285,10 @@ function analyzeQuery(parsedUrl) {
 
   if (parsedUrl.hash) {
     const fragment = decodeRepeatedly(parsedUrl.hash.slice(1), 2);
-
     fragmentHasUrl = /https?:\/\//i.test(fragment.value);
-
     fragmentHasSensitiveMaterial =
-      /(?:access_token|id_token|token|code|state|session)=/i
-        .test(fragment.value);
+      /(?:access_token|id_token|token|code|state|session)=/i.test(fragment.value) ||
+      /^eyj[a-z0-9_-]{8,}\./i.test(fragment.value);
 
     if (fragmentHasUrl) {
       state.indicators.push("URL_PRESENT_IN_FRAGMENT");
@@ -251,6 +296,7 @@ function analyzeQuery(parsedUrl) {
 
     if (fragmentHasSensitiveMaterial) {
       state.indicators.push("SENSITIVE_FRAGMENT_PARAMETER_PRESENT");
+      state.indicators.push("SENSITIVE_FRAGMENT_DETECTED");
     }
   }
 
@@ -267,6 +313,7 @@ function analyzeQuery(parsedUrl) {
     blockedNestedDestinationCount: state.blockedNestedDestinationCount,
     fragmentPresent: Boolean(parsedUrl.hash),
     fragmentHasUrl,
+    fragmentContainsSensitiveMaterial: fragmentHasSensitiveMaterial,
     fragmentHasSensitiveMaterial
   };
 }
@@ -274,5 +321,6 @@ function analyzeQuery(parsedUrl) {
 module.exports = {
   analyzeQuery,
   decodeRepeatedly,
-  normalizeKey
+  normalizeKey,
+  tryDecodeBase64Redirect
 };

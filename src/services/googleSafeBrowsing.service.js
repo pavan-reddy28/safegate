@@ -698,7 +698,17 @@ function saveCachedResponse(
    MAIN GOOGLE SAFE BROWSING SERVICE
 ========================================================= */
 
+const env = require("../config/env");
+
 async function checkGoogleReputation(inputUrl) {
+    if (env.strictOfflineMode) {
+        return {
+            status: "OFFLINE_MODE_SKIPPED",
+            threatMatches: [],
+            cacheHit: false
+        };
+    }
+
     let hashData;
 
     try {

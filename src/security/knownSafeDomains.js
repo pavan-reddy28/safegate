@@ -3,38 +3,23 @@
 /**
  * knownSafeDomains.js
  *
- * A locally maintained set of well-known, authoritative domains that are
- * almost universally safe for ordinary link navigation.
+ * Locally maintained set of authoritative first-party domains.
  *
- * PURPOSE
- * -------
- * When the full analysis pipeline (local heuristics + Google Safe Browsing)
- * returns NO_KNOWN_THREAT for a URL whose registrable domain is on this list,
- * the response is upgraded to KNOWN_SAFE.  This short-circuits any residual
- * "open with caution" friction for genuinely routine links.
+ * SECURITY RULE:
+ * Never add multi-tenant UGC/hosting platforms, CDNs, or link shorteners
+ * (e.g. googleusercontent.com, sites.google.com, amazonaws.com, bit.ly),
+ * because attackers host phishing pages on those domains.
  *
- * PRIVACY GUARANTEE
- * -----------------
- * This module never receives or stores the full URL.  Only the registrable
- * domain (e.g. "google.com") extracted by the domain analyzer is passed here.
- * No path, query string or fragment is ever seen by this module.
- *
- * MAINTENANCE
- * -----------
- * Add entries only for official first-party domains.  Do NOT add CDNs, link
- * shorteners, URL-redirect services, or any domain that hosts user-generated
- * content, because those can still carry malicious paths even if the domain
- * itself is legitimate.
+ * PRIVACY GUARANTEE:
+ * Only the registrable domain (e.g. "sbi.co.in") is checked here.
+ * No path, query string, or fragment is ever seen by this module.
  */
 
 const KNOWN_SAFE_REGISTRABLE_DOMAINS = new Set([
-  // Google
+  // Google (first-party web properties only — NOT googleusercontent.com)
   "google.com",
   "google.co.in",
-  "googleapis.com",
-  "googleusercontent.com",
   "gmail.com",
-  "g.co",
   "youtube.com",
 
   // Microsoft
@@ -44,7 +29,6 @@ const KNOWN_SAFE_REGISTRABLE_DOMAINS = new Set([
   "outlook.com",
   "office.com",
   "office365.com",
-  "sharepoint.com",
 
   // Apple
   "apple.com",
@@ -57,44 +41,72 @@ const KNOWN_SAFE_REGISTRABLE_DOMAINS = new Set([
   "whatsapp.com",
   "whatsapp.net",
 
-  // Amazon
+  // E-Commerce
   "amazon.in",
   "amazon.com",
+  "flipkart.com",
 
-  // Indian Banks (official first-party)
+  // Indian Banks (official first-party domains)
   "sbi.co.in",
   "onlinesbi.sbi",
+  "sbi.bank.in",
   "hdfcbank.com",
   "icicibank.com",
   "axisbank.com",
   "kotak.com",
   "pnbindia.in",
   "canarabank.com",
+  "bankofbaroda.in",
+  "unionbankofindia.co.in",
+  "indusind.com",
+  "yesbank.in",
+  "idfcfirstbank.com",
+
+  // Global Banks
+  "chase.com",
+  "bankofamerica.com",
+  "wellsfargo.com",
+  "citi.com",
+  "hsbc.com",
+  "paypal.com",
 
   // UPI / Payments
   "npci.org.in",
-  "upi.one",
   "bhimupi.org.in",
   "phonepe.com",
   "paytm.com",
+  "razorpay.com",
 
-  // Government of India
+  // Indian Telecom
+  "jio.com",
+  "airtel.in",
+  "myvi.in",
+  "bsnl.co.in",
+
+  // Government of India / Public Services
   "gov.in",
   "nic.in",
   "india.gov.in",
   "mca.gov.in",
   "incometax.gov.in",
+  "uidai.gov.in",
+  "epfindia.gov.in",
+  "digilocker.gov.in",
+  "parivahan.gov.in",
+  "indiapost.gov.in",
+  "irctc.co.in",
 
   // Utilities
   "wikipedia.org",
   "wikimedia.org",
-  "openai.com"
+  "openai.com",
+  "netflix.com"
 ]);
 
 /**
- * Returns true when the registrable domain is on the allow-list.
+ * Returns true when the registrable domain is on the authoritative allow-list.
  *
- * @param {string|null} registrableDomain  — e.g. "sbi.co.in"
+ * @param {string|null} registrableDomain
  * @returns {boolean}
  */
 function isKnownSafeDomain(registrableDomain) {
@@ -107,4 +119,4 @@ function isKnownSafeDomain(registrableDomain) {
   );
 }
 
-module.exports = { isKnownSafeDomain };
+module.exports = { isKnownSafeDomain, KNOWN_SAFE_REGISTRABLE_DOMAINS };

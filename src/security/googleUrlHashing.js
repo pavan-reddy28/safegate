@@ -212,15 +212,38 @@ function buildPathCandidates(pathname, search) {
   return [...new Set(candidates)].slice(0, 6);
 }
 
+function isSensitiveHostLabel(label) {
+  const value = String(label || "");
+  if (/^[a-f0-9]{32,}$/i.test(value)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    return true;
+  }
+  if (/^[a-z0-9_-]{36,}$/i.test(value) && /[a-z]/i.test(value) && /[0-9]/.test(value)) {
+    return true;
+  }
+  return false;
+}
+
 function createGoogleHashData(input) {
   const canonical = canonicalizeUrl(input);
 
-  const hosts = buildHostCandidates(canonical.hostname);
+  const rawHosts = buildHostCandidates(canonical.hostname);
+  const registrable = getDomain(canonical.hostname) || canonical.hostname;
+
+  // Extra privacy guard: omit host candidates containing secret/UUID/token-like
+  // subdomain labels so even 4-byte prefixes of user-specific subdomains never leave the device.
+  const hosts = rawHosts.filter((candidateHost) => {
+    if (candidateHost === registrable) return true;
+    const subParts = candidateHost.slice(0, Math.max(0, candidateHost.length - registrable.length)).split(".").filter(Boolean);
+    return !subParts.some(isSensitiveHostLabel);
+  });
+
+  const safeHosts = hosts.length > 0 ? hosts : [registrable];
 
   // Strict privacy mode:
   // Only hostname variants plus "/" are hashed for Google.
   // No original path, query string or fragment is included.
-  const expressions = hosts.map(host => `${host}/`);
+  const expressions = safeHosts.map(host => `${host}/`);
 
   const uniqueExpressions = [...new Set(expressions)].slice(
     0,

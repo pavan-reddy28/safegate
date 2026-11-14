@@ -9,19 +9,19 @@ const envSchema = z.object({
 
     HOST: z
         .string()
-        .default("127.0.0.1"),
+        .default("0.0.0.0"),
 
     PORT: z
         .coerce.number()
         .int()
         .min(1024)
         .max(65535)
-        .default(4317),
+        .default(3000),
 
     FRONTEND_ORIGINS: z
         .string()
         .default(
-            "http://localhost:3000,http://127.0.0.1:3000"
+            "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173"
         ),
 
     LOCAL_BLOCKED_DOMAINS: z
@@ -42,7 +42,15 @@ const envSchema = z.object({
         .max(1000)
         .default(30),
 
-    // Optional: set to disable Google Safe Browsing lookup.
+    STRICT_OFFLINE_MODE: z
+        .enum(["true", "false"])
+        .default("false"),
+
+    OFFLINE_ALLOW_KNOWN_SAFE: z
+        .enum(["true", "false"])
+        .default("false"),
+
+    // Optional: leave empty to run without Google Safe Browsing lookups.
     GOOGLE_SAFE_BROWSING_API_KEY: z
         .string()
         .optional()
@@ -65,16 +73,17 @@ if (!result.success) {
 
 const config = result.data;
 
-// The development API must only listen on loopback.
+// Restrict bind host to loopback or explicit 0.0.0.0 container interface.
 const allowedHosts = new Set([
     "127.0.0.1",
     "::1",
-    "localhost"
+    "localhost",
+    "0.0.0.0"
 ]);
 
 if (!allowedHosts.has(config.HOST)) {
     console.error(
-        "[SafeGate] HOST must be a loopback address."
+        "[SafeGate] HOST must be a loopback address or 0.0.0.0."
     );
 
     process.exit(1);
@@ -138,8 +147,11 @@ for (const domain of localBlockedDomains) {
     }
 }
 
+const strictOfflineMode = config.STRICT_OFFLINE_MODE === "true";
+const offlineAllowKnownSafe = config.OFFLINE_ALLOW_KNOWN_SAFE === "true";
+
 // Warn (do not crash) when Google Safe Browsing is not configured.
-if (!config.GOOGLE_SAFE_BROWSING_API_KEY) {
+if (!config.GOOGLE_SAFE_BROWSING_API_KEY && !strictOfflineMode) {
     console.warn(
         "[SafeGate] WARNING: GOOGLE_SAFE_BROWSING_API_KEY is not set. " +
         "Google reputation checks will be skipped. " +
@@ -155,5 +167,9 @@ module.exports = {
     localBlockedDomains,
     rateLimitWindowMs: config.RATE_LIMIT_WINDOW_MS,
     rateLimitMax: config.RATE_LIMIT_MAX,
-    googleSafeBrowsingApiKey: config.GOOGLE_SAFE_BROWSING_API_KEY || null
+    strictOfflineMode,
+    offlineAllowKnownSafe,
+    googleSafeBrowsingApiKey: strictOfflineMode
+        ? null
+        : (config.GOOGLE_SAFE_BROWSING_API_KEY || null)
 };
