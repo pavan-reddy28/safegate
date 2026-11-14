@@ -1,10 +1,11 @@
 "use strict";
 
-const { analyzeUrl, getGoogleSafePath } = require("./urlAnalyzer");
+const { analyzeUrl } = require("./urlAnalyzer");
 const { normalizeUrl } = require("./urlNormalizer");
 const { analyzeDomain } = require("./domainAnalyzer");
 const { analyzePath, isSensitivePathSegment } = require("./pathAnalyzer");
 const { analyzeQuery } = require("./queryAnalyzer");
+const { analyzeScamLures } = require("./scamLureAnalyzer");
 
 module.exports = {
   analyzeUrl,
@@ -12,6 +13,6 @@ module.exports = {
   analyzeDomain,
   analyzePath,
   analyzeQuery,
-  isSensitivePathSegment,
-  getGoogleSafePath
+  analyzeScamLures,
+  isSensitivePathSegment
 };

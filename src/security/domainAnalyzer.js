@@ -8,6 +8,7 @@ const {
   isBlockedHost,
   isUrlShortener,
   isTunnelOrDynamicDns,
+  isFreeUgcOrCloudHosting,
   hasHighRiskTld
 } = require("./localThreatList");
 
@@ -21,34 +22,27 @@ const RESERVED_SUFFIXES = new Set([
   "lan",
   "home",
   "arpa",
-  "onion"
+  "onion",
+  "intranet",
+  "corp"
 ]);
 
 const DANGEROUS_PORTS = new Set([
   "21", "22", "23", "25", "110", "143", "445",
-  "1433", "3306", "3389", "4444", "5432", "5900", "6379"
+  "1433", "3306", "3389", "4444", "5432", "5900",
+  "6379", "6667", "31337"
 ]);
 
 const BRAND_DOMAINS = {
   microsoft: new Set([
-    "microsoft.com",
-    "microsoftonline.com",
-    "live.com",
-    "outlook.com",
-    "office.com",
-    "office365.com",
-    "sharepoint.com",
-    "onmicrosoft.com"
+    "microsoft.com", "microsoftonline.com", "live.com",
+    "outlook.com", "office.com", "office365.com",
+    "sharepoint.com", "onmicrosoft.com"
   ]),
   google: new Set([
-    "google.com",
-    "google.co.in",
-    "googleapis.com",
-    "googleusercontent.com",
-    "googlemail.com",
-    "gmail.com",
-    "g.co",
-    "youtube.com"
+    "google.com", "google.co.in", "googleapis.com",
+    "googleusercontent.com", "googlemail.com", "gmail.com",
+    "g.co", "youtube.com"
   ]),
   apple: new Set(["apple.com", "icloud.com"]),
   paypal: new Set(["paypal.com"]),
@@ -59,7 +53,7 @@ const BRAND_DOMAINS = {
   instagram: new Set(["instagram.com"]),
   netflix: new Set(["netflix.com"]),
 
-  // Indian Banks & Payments (prime targets of "amount credited" SMS scams)
+  // Indian Banks & Payments
   sbi: new Set(["sbi.co.in", "onlinesbi.sbi", "sbi.bank.in"]),
   hdfc: new Set(["hdfcbank.com"]),
   hdfcbank: new Set(["hdfcbank.com"]),
@@ -102,9 +96,7 @@ const BRAND_DOMAINS = {
   delhivery: new Set(["delhivery.com"])
 };
 
-// Confusable Unicode -> Latin ASCII skeleton map (Cyrillic, Greek, etc.)
 const CONFUSABLE_CHAR_MAP = {
-  // Cyrillic lowercase & uppercase mapped to visually identical Latin
   "\u0430": "a", "\u0410": "a",
   "\u0432": "b", "\u0412": "b",
   "\u0435": "e", "\u0415": "e",
@@ -124,7 +116,6 @@ const CONFUSABLE_CHAR_MAP = {
   "\u04BB": "h", "\u04BA": "h",
   "\u0501": "d", "\u04CF": "l", "\u04C0": "l",
   "\u0578": "n", "\u0570": "h", "\u0585": "o",
-  // Greek lookalikes
   "\u03B1": "a", "\u0391": "a",
   "\u03B2": "b", "\u0392": "b",
   "\u03B5": "e", "\u0395": "e",
@@ -177,15 +168,14 @@ function toLeetVariants(token) {
     .replace(/7/g, "t")
     .replace(/8/g, "b");
 
-  const digraph = oneAsI.replace(/rn/g, "m").replace(/vv/g, "w");
-  const digraphL = single.replace(/rn/g, "m").replace(/vv/g, "w");
+  const digraph = oneAsI.replace(/rn/g, "m").replace(/vv/g, "w").replace(/cl/g, "d");
+  const digraphL = single.replace(/rn/g, "m").replace(/vv/g, "w").replace(/cl/g, "d");
 
   return [...new Set([token, single, oneAsI, digraph, digraphL])];
 }
 
 function isReservedHostname(hostname) {
   const host = String(hostname || "").toLowerCase();
-
   return [...RESERVED_SUFFIXES].some(
     (suffix) => host === suffix || host.endsWith(`.${suffix}`)
   );
@@ -206,7 +196,6 @@ function hasValidDnsLabels(hostname) {
 
 function labelEntropy(value) {
   if (!value) return 0;
-
   const counts = new Map();
   for (const character of value) {
     counts.set(character, (counts.get(character) || 0) + 1);
@@ -243,7 +232,6 @@ function hasMixedScripts(hostname) {
 
 function editDistance(a, b) {
   let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
-
   for (let i = 1; i <= a.length; i++) {
     const current = [i];
     for (let j = 1; j <= b.length; j++) {
@@ -256,7 +244,6 @@ function editDistance(a, b) {
     }
     previous = current;
   }
-
   return previous[b.length];
 }
 
@@ -266,6 +253,37 @@ function editDistanceAtMost(a, b, maxDist) {
   }
   const dist = editDistance(a, b);
   return dist > 0 && dist <= maxDist;
+}
+
+/**
+ * Detect if an entire official domain (e.g. "sbi.co.in", "paypal.com", "hdfcbank.com")
+ * is embedded inside the subdomain prefix of an unrelated domain:
+ * e.g., https://sbi.co.in.verify-login.com/ or https://paypal.com.ngrok-free.app/
+ */
+function hasSpoofedBrandDomainInSubdomain(hostname, registrableDomain) {
+  const host = String(hostname || "").toLowerCase();
+  const baseDomain = String(registrableDomain || "").toLowerCase();
+  if (!baseDomain || host === baseDomain) return false;
+
+  const subdomainPrefix = host.slice(0, Math.max(0, host.length - baseDomain.length - 1));
+  if (!subdomainPrefix) return false;
+
+  for (const officialDomains of Object.values(BRAND_DOMAINS)) {
+    if (officialDomains.has(baseDomain)) continue;
+
+    for (const official of officialDomains) {
+      if (
+        subdomainPrefix === official ||
+        subdomainPrefix.endsWith(`.${official}`) ||
+        subdomainPrefix.includes(`${official}.`) ||
+        subdomainPrefix.includes(official.replace(/\./g, "-"))
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function analyzeBrandImpersonation(hostname, registrableDomain) {
@@ -278,6 +296,11 @@ function analyzeBrandImpersonation(hostname, registrableDomain) {
 
   const indicators = [];
   let riskScore = 0;
+
+  if (hasSpoofedBrandDomainInSubdomain(rawLower, baseDomain)) {
+    indicators.push("BRAND_DOMAIN_SPOOFED_IN_SUBDOMAIN");
+    riskScore += 8;
+  }
 
   const extractTokens = (lbls) =>
     lbls.flatMap((label) => label.split(/[^a-z0-9]+/).filter(Boolean));
@@ -293,8 +316,6 @@ function analyzeBrandImpersonation(hostname, registrableDomain) {
       continue;
     }
 
-    // Also avoid flagging legitimate subdomains/domains that are official under another entry
-    // when checking skeleton match.
     const maxTypos = brand.length >= 6 ? 2 : brand.length >= 4 ? 1 : 0;
 
     const directOrSubMatch = allTokenVariants.some((token) => {
@@ -342,6 +363,19 @@ function analyzeBrandImpersonation(hostname, registrableDomain) {
     indicators: [...new Set(indicators)],
     riskScore
   };
+}
+
+function isDgaLikeLabel(label) {
+  if (!label || label.length < 12) return false;
+  const clean = label.replace(/-/g, "");
+  if (clean.length < 12) return false;
+
+  const digits = (clean.match(/\d/g) || []).length;
+  const digitRatio = digits / clean.length;
+  const ent = labelEntropy(clean);
+
+  // Typical random DGA / disposable phishing domain: long, mixed digits, high entropy
+  return (ent >= 3.6 && digitRatio >= 0.2) || (clean.length >= 18 && ent >= 3.9);
 }
 
 function analyzeDomain(hostname, parsedUrl, options = {}) {
@@ -400,7 +434,6 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
 
   if (isIp) {
     let address;
-
     try {
       address = ipaddr.process(ipCandidate);
     } catch {
@@ -412,8 +445,6 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
       };
     }
 
-    // Blocks private, loopback, link-local (169.254/16 cloud metadata),
-    // carrier-grade NAT (100.64/10), multicast, reserved, and unspecified IPs.
     if (address.range() !== "unicast") {
       return {
         blocked: true,
@@ -425,7 +456,7 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
 
     indicators.push("IP_LITERAL_HOST");
     indicators.push("PUBLIC_IP_LITERAL_HOST");
-    riskScore += 2;
+    riskScore += 4;
   } else {
     if (!hasValidDnsLabels(host)) {
       return {
@@ -485,6 +516,12 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
       riskScore += 1;
     }
 
+    const mainDomainLabel = (registrableDomain || host).split(".")[0];
+    if (isDgaLikeLabel(mainDomainLabel)) {
+      indicators.push("HIGH_ENTROPY_DGA_DOMAIN");
+      riskScore += 3;
+    }
+
     if (isUrlShortener(host)) {
       indicators.push("URL_SHORTENER_HIDES_DESTINATION");
       riskScore += 4;
@@ -492,6 +529,11 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
 
     if (isTunnelOrDynamicDns(host)) {
       indicators.push("FREE_TUNNEL_OR_DYNAMIC_DNS_HOST");
+      riskScore += 4;
+    }
+
+    if (isFreeUgcOrCloudHosting(host)) {
+      indicators.push("FREE_UGC_OR_CLOUD_HOSTING");
       riskScore += 3;
     }
 
@@ -515,9 +557,20 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
     riskScore += 2;
   }
 
+  const uniqueIndicators = [...new Set(indicators)];
+
+  if (uniqueIndicators.includes("BRAND_DOMAIN_SPOOFED_IN_SUBDOMAIN")) {
+    return {
+      blocked: true,
+      reasonCode: "BRAND_DOMAIN_SPOOFED_IN_SUBDOMAIN",
+      indicators: uniqueIndicators,
+      riskScore
+    };
+  }
+
   return {
     blocked: false,
-    indicators: [...new Set(indicators)],
+    indicators: uniqueIndicators,
     riskScore,
     destination: {
       hostname: host,
@@ -533,6 +586,7 @@ module.exports = {
   isReservedHostname,
   hasMixedScripts,
   analyzeBrandImpersonation,
+  hasSpoofedBrandDomainInSubdomain,
   toConfusableSkeleton,
   toLeetVariants
 };

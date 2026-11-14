@@ -1,6 +1,7 @@
 "use strict";
 
 const { analyzeDomain } = require("./domainAnalyzer");
+const { analyzePath } = require("./pathAnalyzer");
 const { isBlockedHost } = require("./localThreatList");
 
 const REDIRECT_PARAMETERS = new Set([
@@ -22,7 +23,12 @@ const SENSITIVE_PARAMETERS = new Set([
   "pan", "aadhaar", "aadhar", "upi", "pa", "cvv"
 ]);
 
-// Includes mobile & payment deep-link schemes abused in SMS scams (upi://pay, intent://, etc.)
+const TRACKING_PARAMETERS = new Set([
+  "utmsource", "utmmedium", "utmcampaign", "utmterm", "utmcontent",
+  "fbclid", "gclid", "dclid", "msclkid", "mc_eid", "mceid",
+  "igshid", "si", "yclid", "wickedid", "oly_enc_id"
+]);
+
 const DANGEROUS_SCHEME =
   /^(?:javascript|data|vbscript|file|intent|upi|tel|sms|smsto|mmsto|market|blob|filesystem|about|view-source):/i;
 
@@ -58,27 +64,41 @@ function decodeRepeatedly(value, maximumPasses = 2) {
   };
 }
 
-/**
- * Safely check if a query value is Base64-encoded and hides a URL or dangerous scheme.
- * Never returns or logs the decoded value.
- */
-function tryDecodeBase64Redirect(value) {
+function tryDecodeSmuggledUrl(value) {
   const trimmed = String(value || "").trim();
   if (trimmed.length < 12 || trimmed.length > 2048) return null;
-  if (!/^[A-Za-z0-9+/_-]{12,}={0,2}$/.test(trimmed)) return null;
 
-  try {
-    const normalized = trimmed.replace(/-/g, "+").replace(/_/g, "/");
-    const decoded = Buffer.from(normalized, "base64").toString("utf8").trim();
-    if (
-      /^(?:https?:\/\/|\/\/)/i.test(decoded) ||
-      DANGEROUS_SCHEME.test(decoded.replace(/[\u0000-\u0020\u007f]/g, ""))
-    ) {
-      return decoded;
+  // Base64 / Base64URL smuggling
+  if (/^[A-Za-z0-9+/_-]{12,}={0,2}$/.test(trimmed)) {
+    try {
+      const normalized = trimmed.replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = Buffer.from(normalized, "base64").toString("utf8").trim();
+      if (
+        /^(?:https?:\/\/|\/\/)/i.test(decoded) ||
+        DANGEROUS_SCHEME.test(decoded.replace(/[\u0000-\u0020\u007f]/g, ""))
+      ) {
+        return { decoded, kind: "BASE64" };
+      }
+    } catch {
+      // ignore
     }
-  } catch {
-    return null;
   }
+
+  // Hex smuggling (e.g., 68747470733a2f2f...)
+  if (trimmed.length >= 24 && trimmed.length % 2 === 0 && /^[0-9a-f]+$/i.test(trimmed)) {
+    try {
+      const decoded = Buffer.from(trimmed, "hex").toString("utf8").trim();
+      if (
+        /^(?:https?:\/\/|\/\/)/i.test(decoded) ||
+        DANGEROUS_SCHEME.test(decoded.replace(/[\u0000-\u0020\u007f]/g, ""))
+      ) {
+        return { decoded, kind: "HEX" };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return null;
 }
 
@@ -90,7 +110,6 @@ function parseNestedHttpUrl(value) {
   }
 
   let nestedUrl;
-
   try {
     nestedUrl = candidate.startsWith("//")
       ? new URL(`https:${candidate}`)
@@ -114,8 +133,6 @@ function parseNestedHttpUrl(value) {
 
 function inspectRedirectCandidate(candidate, state, depth = 0) {
   const value = String(candidate || "").trim();
-
-  // Strip ASCII control/whitespace before probing scheme to catch parser evasion.
   const schemeProbe = value.replace(/[\u0000-\u0020\u007f]/g, "");
 
   if (DANGEROUS_SCHEME.test(schemeProbe)) {
@@ -124,11 +141,13 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
     return;
   }
 
-  const base64Target = tryDecodeBase64Redirect(value);
-  if (base64Target) {
-    state.indicators.push("BASE64_SMUGGLED_REDIRECT");
+  const smuggled = tryDecodeSmuggledUrl(value);
+  if (smuggled) {
+    state.indicators.push(
+      smuggled.kind === "HEX" ? "HEX_SMUGGLED_REDIRECT" : "BASE64_SMUGGLED_REDIRECT"
+    );
     state.riskScore += 2;
-    inspectRedirectCandidate(base64Target, state, depth + 1);
+    inspectRedirectCandidate(smuggled.decoded, state, depth + 1);
     return;
   }
 
@@ -156,9 +175,8 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
     return;
   }
 
-  // Run full local domain analysis on the nested redirect target
+  // Run full local domain analysis on nested redirect hop
   const nestedDomainAnalysis = analyzeDomain(nested.hostname, nested.parsedUrl);
-
   if (nestedDomainAnalysis.blocked) {
     state.indicators.push("NESTED_REDIRECT_DESTINATION_BLOCKED");
     state.blockedNestedDestinationCount++;
@@ -166,7 +184,20 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
     return;
   }
 
-  // Inherit high-risk nested domain signals (e.g., brand impersonation or tunnel host inside redirect)
+  // Run full path analysis on nested redirect hop (catches redirects to .apk, double-ext, etc.)
+  const nestedPathAnalysis = analyzePath(nested.parsedUrl.pathname || "/");
+  if (nestedPathAnalysis.hardBlock) {
+    state.indicators.push("NESTED_REDIRECT_MALICIOUS_PATH");
+    state.hardBlockReason = nestedPathAnalysis.hardBlockReason;
+    return;
+  }
+
+  if (nestedPathAnalysis.indicators.includes("MOBILE_SIDELOAD_INSTALLER_PATH")) {
+    state.indicators.push("NESTED_REDIRECT_TO_MOBILE_INSTALLER");
+    state.hardBlockReason = "NESTED_REDIRECT_TO_MOBILE_INSTALLER";
+    return;
+  }
+
   if (nestedDomainAnalysis.riskScore >= 4) {
     state.indicators.push("SUSPICIOUS_NESTED_REDIRECT_DOMAIN");
     state.riskScore += nestedDomainAnalysis.riskScore;
@@ -216,6 +247,7 @@ function analyzeQuery(parsedUrl) {
 
   let redirectParameterCount = 0;
   let sensitiveParameterCount = 0;
+  let trackingParameterCount = 0;
   let malformedRedirectCount = 0;
   let doubleEncodedValueCount = 0;
 
@@ -234,6 +266,7 @@ function analyzeQuery(parsedUrl) {
 
     const isRedirect = REDIRECT_PARAMETERS.has(normalizedKey);
     const isSensitive = SENSITIVE_PARAMETERS.has(normalizedKey);
+    const isTracking = TRACKING_PARAMETERS.has(normalizedKey);
 
     if (isRedirect) {
       redirectParameterCount++;
@@ -244,6 +277,10 @@ function analyzeQuery(parsedUrl) {
       sensitiveParameterCount++;
       state.indicators.push("SENSITIVE_QUERY_PARAMETER_PRESENT");
       state.indicators.push("SENSITIVE_QUERY_PARAMETERS_DETECTED");
+    }
+
+    if (isTracking) {
+      trackingParameterCount++;
     }
 
     const decoded = decodeRepeatedly(value, 2);
@@ -269,15 +306,20 @@ function analyzeQuery(parsedUrl) {
       if (DANGEROUS_SCHEME.test(trimmedVal)) {
         state.indicators.push("DANGEROUS_SCHEME_TEXT_IN_QUERY_VALUE");
       } else {
-        // Also inspect base64-smuggled redirect URLs even in non-standard parameter names
-        const smuggled = tryDecodeBase64Redirect(trimmedVal);
+        const smuggled = tryDecodeSmuggledUrl(trimmedVal);
         if (smuggled) {
-          state.indicators.push("BASE64_SMUGGLED_URL_IN_QUERY");
+          state.indicators.push(
+            smuggled.kind === "HEX" ? "HEX_SMUGGLED_URL_IN_QUERY" : "BASE64_SMUGGLED_URL_IN_QUERY"
+          );
           state.riskScore += 2;
-          inspectRedirectCandidate(smuggled, state, 1);
+          inspectRedirectCandidate(smuggled.decoded, state, 1);
         }
       }
     }
+  }
+
+  if (trackingParameterCount > 0) {
+    state.indicators.push("TRACKING_PARAMETERS_DETECTED");
   }
 
   let fragmentHasUrl = false;
@@ -308,6 +350,7 @@ function analyzeQuery(parsedUrl) {
     redirectParameterCount,
     nestedDestinationCount: state.nestedDestinationCount,
     sensitiveParameterCount,
+    trackingParameterCount,
     malformedRedirectCount,
     doubleEncodedValueCount,
     blockedNestedDestinationCount: state.blockedNestedDestinationCount,
@@ -322,5 +365,5 @@ module.exports = {
   analyzeQuery,
   decodeRepeatedly,
   normalizeKey,
-  tryDecodeBase64Redirect
+  tryDecodeSmuggledUrl
 };

@@ -1,92 +1,64 @@
+"use strict";
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-    calculateFinalDecision
+  calculateFinalDecision
 } = require("../src/services/verification.service");
 
-function local(decision) {
-    return { decision };
+function local(decision, extra = {}) {
+  return {
+    decision,
+    riskScore: 0,
+    destination: { protocol: "https:" },
+    ...extra
+  };
 }
 
-function google(status) {
-    return { status };
-}
+test("Local BLOCK always produces BLOCK / DO_NOT_OPEN even for known domain", () => {
+  const result = calculateFinalDecision(
+    local("BLOCK", { reasonCodes: ["PHISHING_BRAND_IMPERSONATION_CONFIRMED"] }),
+    "sbi.co.in"
+  );
 
-test("Local BLOCK cannot be overridden by Google no-match", () => {
-    const result = calculateFinalDecision(
-        local("BLOCK"),
-        google("NO_THREAT_FOUND")
-    );
-
-    assert.equal(result.finalDecision, "BLOCK");
-    assert.equal(result.recommendedAction, "DO_NOT_OPEN");
+  assert.equal(result.finalDecision, "BLOCK");
+  assert.equal(result.recommendedAction, "DO_NOT_OPEN");
 });
 
-test("Local BLOCK remains BLOCK when Google is unavailable", () => {
-    const result = calculateFinalDecision(
-        local("BLOCK"),
-        google("UNAVAILABLE")
-    );
+test("Local SUSPICIOUS produces SUSPICIOUS / WARN_USER", () => {
+  const result = calculateFinalDecision(local("SUSPICIOUS", { riskScore: 4 }), "bit.ly");
 
-    assert.equal(result.finalDecision, "BLOCK");
+  assert.equal(result.finalDecision, "SUSPICIOUS");
+  assert.equal(result.recommendedAction, "WARN_USER");
 });
 
-test("Google threat match blocks a structurally clean URL", () => {
-    const result = calculateFinalDecision(
-        local("REPUTATION_CHECK_REQUIRED"),
-        google("THREAT_FOUND")
-    );
+test("Clean known-safe HTTPS domain produces KNOWN_SAFE / ALLOW", () => {
+  const result = calculateFinalDecision(
+    local("REPUTATION_CHECK_REQUIRED", { riskScore: 0, destination: { protocol: "https:" } }),
+    "sbi.co.in"
+  );
 
-    assert.equal(result.finalDecision, "BLOCK");
-    assert.equal(result.recommendedAction, "DO_NOT_OPEN");
+  assert.equal(result.finalDecision, "KNOWN_SAFE");
+  assert.equal(result.recommendedAction, "ALLOW");
 });
 
-test("Local SUSPICIOUS remains suspicious when Google finds no threat", () => {
-    const result = calculateFinalDecision(
-        local("SUSPICIOUS"),
-        google("NO_THREAT_FOUND")
-    );
+test("Known-safe domain over unencrypted HTTP is NOT upgraded to KNOWN_SAFE", () => {
+  const result = calculateFinalDecision(
+    local("REPUTATION_CHECK_REQUIRED", { riskScore: 1, destination: { protocol: "http:" } }),
+    "sbi.co.in"
+  );
 
-    assert.equal(result.finalDecision, "SUSPICIOUS");
-    assert.equal(result.recommendedAction, "WARN_USER");
+  assert.equal(result.finalDecision, "NO_KNOWN_THREAT");
+  assert.equal(result.recommendedAction, "ALLOW_WITH_CAUTION");
 });
 
-test("Local SUSPICIOUS becomes BLOCK when Google finds a threat", () => {
-    const result = calculateFinalDecision(
-        local("SUSPICIOUS"),
-        google("THREAT_FOUND")
-    );
+test("Clean unknown HTTPS domain produces NO_KNOWN_THREAT / ALLOW_WITH_CAUTION", () => {
+  const result = calculateFinalDecision(
+    local("REPUTATION_CHECK_REQUIRED", { riskScore: 0, destination: { protocol: "https:" } }),
+    "example.org"
+  );
 
-    assert.equal(result.finalDecision, "BLOCK");
-});
-
-test("Clean local result and Google no-match produce NO_KNOWN_THREAT", () => {
-    const result = calculateFinalDecision(
-        local("REPUTATION_CHECK_REQUIRED"),
-        google("NO_THREAT_FOUND")
-    );
-
-    assert.equal(result.finalDecision, "NO_KNOWN_THREAT");
-    assert.equal(result.recommendedAction, "ALLOW_WITH_CAUTION");
-});
-
-test("Google unavailable produces HOLD for a structurally clean URL", () => {
-    const result = calculateFinalDecision(
-        local("REPUTATION_CHECK_REQUIRED"),
-        google("UNAVAILABLE")
-    );
-
-    assert.equal(result.finalDecision, "HOLD");
-    assert.equal(result.recommendedAction, "DO_NOT_OPEN");
-});
-
-test("Google not configured must not produce approval", () => {
-    const result = calculateFinalDecision(
-        local("REPUTATION_CHECK_REQUIRED"),
-        google("NOT_CONFIGURED")
-    );
-
-    assert.equal(result.finalDecision, "HOLD");
+  assert.equal(result.finalDecision, "NO_KNOWN_THREAT");
+  assert.equal(result.recommendedAction, "ALLOW_WITH_CAUTION");
 });

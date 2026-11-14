@@ -2,13 +2,11 @@
 
 const { localBlockedDomains } = require("../config/env");
 
-// Dynamically configured blocked domains + built-in known malicious test/sinkhole domains
 const blockedDomains = new Set(
   localBlockedDomains.map((domain) => domain.toLowerCase())
 );
 
-// Known URL shorteners that hide the true destination from the user & local analyzer
-// without making a privacy-leaking outbound HTTP request.
+// Known URL shorteners that hide the true destination from the user & local analyzer.
 const URL_SHORTENER_DOMAINS = new Set([
   "bit.ly",
   "tinyurl.com",
@@ -33,11 +31,14 @@ const URL_SHORTENER_DOMAINS = new Set([
   "urlz.fr",
   "snip.ly",
   "clck.ru",
-  "soo.gd"
+  "soo.gd",
+  "trib.al",
+  "bit.do",
+  "mcaf.ee",
+  "shorte.st"
 ]);
 
-// Free dynamic DNS, disposable tunneling, and abused free-tier hosting suffixes
-// heavily exploited in SMS banking/KYC phishing campaigns.
+// Free dynamic DNS, disposable tunneling, and abused free-tier hosting suffixes.
 const TUNNEL_OR_DYNAMIC_DNS_DOMAINS = new Set([
   "ngrok.io",
   "ngrok-free.app",
@@ -53,31 +54,45 @@ const TUNNEL_OR_DYNAMIC_DNS_DOMAINS = new Set([
   "zapto.org",
   "ddns.net",
   "000webhostapp.com",
-  "weeblysite.com"
+  "weeblysite.com",
+  "glitch.me",
+  "bplaced.net",
+  "rf.gd",
+  "epizy.com"
+]);
+
+// Multi-tenant UGC / static / form platforms frequently abused for phishing landing pages.
+// Not malicious by default, but high risk when paired with banking/KYC/login/scam lures.
+const FREE_UGC_OR_CLOUD_HOSTING_DOMAINS = new Set([
+  "sites.google.com",
+  "storage.googleapis.com",
+  "firebasestorage.googleapis.com",
+  "blogspot.com",
+  "wordpress.com",
+  "weebly.com",
+  "wixsite.com",
+  "pages.dev",
+  "workers.dev",
+  "vercel.app",
+  "netlify.app",
+  "github.io",
+  "web.app",
+  "firebaseapp.com",
+  "herokuapp.com",
+  "onrender.com",
+  "azurewebsites.net",
+  "cloudfront.net",
+  "s3.amazonaws.com"
 ]);
 
 // High-abuse TLDs frequently seen in automated SMS scam campaigns.
-// Never an automatic block alone, used as a risk signal when combined with other indicators.
 const HIGH_RISK_TLDS = new Set([
-  "tk",
-  "ml",
-  "ga",
-  "cf",
-  "gq",
-  "cfd",
-  "sbs",
-  "icu",
-  "cam",
-  "top",
-  "xyz",
-  "click",
-  "loan",
-  "win",
-  "buzz",
-  "rest",
-  "bar",
-  "vip",
-  "work"
+  "tk", "ml", "ga", "cf", "gq",
+  "cfd", "sbs", "icu", "cam", "top",
+  "xyz", "click", "loan", "win", "buzz",
+  "rest", "bar", "vip", "work", "monster",
+  "zip", "mov", "autos", "cyou", "beauty",
+  "quest", "hair", "skin", "boats", "mom"
 ]);
 
 function matchesDomainSet(hostname, domainSet) {
@@ -104,6 +119,10 @@ function isTunnelOrDynamicDns(hostname) {
   return matchesDomainSet(hostname, TUNNEL_OR_DYNAMIC_DNS_DOMAINS);
 }
 
+function isFreeUgcOrCloudHosting(hostname) {
+  return matchesDomainSet(hostname, FREE_UGC_OR_CLOUD_HOSTING_DOMAINS);
+}
+
 function hasHighRiskTld(hostname) {
   const host = String(hostname || "").toLowerCase().replace(/\.$/, "");
   const parts = host.split(".");
@@ -116,8 +135,10 @@ module.exports = {
   isBlockedHost,
   isUrlShortener,
   isTunnelOrDynamicDns,
+  isFreeUgcOrCloudHosting,
   hasHighRiskTld,
   URL_SHORTENER_DOMAINS,
   TUNNEL_OR_DYNAMIC_DNS_DOMAINS,
+  FREE_UGC_OR_CLOUD_HOSTING_DOMAINS,
   HIGH_RISK_TLDS
 };

@@ -131,9 +131,6 @@ app.use("/api/v1/health", healthRoutes);
 app.use("/api/v1/verify", verificationRoutes);
 app.use("/", healthRoutes);
 
-// The raw client-supplied hash relay is intentionally disabled.
-// Do not mount googleHashRelay.routes here.
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ERROR HANDLERS
 // ─────────────────────────────────────────────────────────────────────────────

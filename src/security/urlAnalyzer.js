@@ -7,7 +7,8 @@ const { analyzeQuery } = require("./queryAnalyzer");
 const { analyzeScamLures } = require("./scamLureAnalyzer");
 const { buildRedactedDestination } = require("./privacyGuard");
 
-const SUSPICIOUS_RISK_THRESHOLD = 4;
+const SUSPICIOUS_RISK_THRESHOLD = 3;
+const LOCAL_BLOCK_SCORE_THRESHOLD = 8;
 
 function blocked(reasonCode, indicators = []) {
   return {
@@ -23,23 +24,22 @@ function blocked(reasonCode, indicators = []) {
     privacy: {
       sensitiveQueryValuesDetected: false,
       sensitivePathSegmentsDetected: false,
-      googleQueryStringExcluded: true,
-      googleFragmentExcluded: true
+      outboundNetworkCalls: 0,
+      zeroEgressOnDevice: true
     }
   };
 }
 
 function analyzeUrl(input) {
-  // Layer 1: Normalize, reject control/bidi/obfuscation tricks, and parse URL locally.
+  // Layer 1: Anti-evasion URL normalization & boundary checks
   const normalized = normalizeUrl(input);
-
   if (!normalized.ok) {
     return blocked(normalized.reasonCode);
   }
 
   const { parsedUrl, hostname, rawPath, obfuscatedIpHost } = normalized;
 
-  // Layer 2: Domain, IP-range, homograph, shortener, tunnel, and brand-impersonation analysis.
+  // Layer 2: Domain, IP, homograph, subdomain-spoof, DGA, shortener, hosting & brand analysis
   const domainAnalysis = analyzeDomain(hostname, parsedUrl, {
     obfuscatedIpHost
   });
@@ -48,7 +48,7 @@ function analyzeUrl(input) {
     return blocked(domainAnalysis.reasonCode, domainAnalysis.indicators);
   }
 
-  // Layer 3: Path, encoding, script-injection, and mobile/desktop executable inspection.
+  // Layer 3: Path, encoding, script injection, double-extension & malware download inspection
   const pathAnalysis = analyzePath(rawPath, parsedUrl.pathname);
 
   if (pathAnalysis.hardBlock) {
@@ -58,7 +58,7 @@ function analyzeUrl(input) {
     );
   }
 
-  // Layer 4: Query, fragment, Base64-smuggling, and multi-hop nested redirect inspection.
+  // Layer 4: Query, fragment, Base64/Hex smuggling & multi-hop nested redirect inspection
   const queryAnalysis = analyzeQuery(parsedUrl);
 
   if (queryAnalysis.hardBlockReason) {
@@ -77,7 +77,7 @@ function analyzeUrl(input) {
     ])
   ];
 
-  // Layer 5: SMS / WhatsApp social-engineering lure & compound phishing escalation.
+  // Layer 5: SMS / WhatsApp social-engineering scam lure & compound escalation engine
   const scamAnalysis = analyzeScamLures({
     hostname,
     registrableDomain: domainAnalysis.destination?.registrableDomain || null,
@@ -100,8 +100,7 @@ function analyzeUrl(input) {
     queryAnalysis.riskScore +
     scamAnalysis.riskScore;
 
-  // High cumulative risk score -> immediate local block
-  if (riskScore >= 10) {
+  if (riskScore >= LOCAL_BLOCK_SCORE_THRESHOLD) {
     return blocked("HIGH_RISK_SCORE_LOCAL_BLOCK", allIndicators);
   }
 
@@ -131,6 +130,7 @@ function analyzeUrl(input) {
         redirectParameterCount: queryAnalysis.redirectParameterCount,
         nestedDestinationCount: queryAnalysis.nestedDestinationCount,
         sensitiveParameterCount: queryAnalysis.sensitiveParameterCount,
+        trackingParameterCount: queryAnalysis.trackingParameterCount,
         fragmentPresent: queryAnalysis.fragmentPresent,
         fragmentHasUrl: queryAnalysis.fragmentHasUrl,
         fragmentContainsSensitiveMaterial:
@@ -142,17 +142,12 @@ function analyzeUrl(input) {
     privacy: {
       sensitiveQueryValuesDetected: queryAnalysis.sensitiveParameterCount > 0,
       sensitivePathSegmentsDetected: pathAnalysis.sensitivePathSegmentCount > 0,
-      googleQueryStringExcluded: true,
-      googleFragmentExcluded: true
+      outboundNetworkCalls: 0,
+      zeroEgressOnDevice: true
     }
   };
 }
 
-function getGoogleSafePath() {
-  return "/";
-}
-
 module.exports = {
-  analyzeUrl,
-  getGoogleSafePath
+  analyzeUrl
 };

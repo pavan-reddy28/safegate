@@ -7,7 +7,6 @@
  * No path content is ever returned or logged.
  */
 
-// Mobile sideload / installer packages — extremely high risk when delivered via SMS
 const MOBILE_INSTALLER_EXTENSIONS = new Set([
   "apk", "aab", "xapk", "apks", "ipa"
 ]);
@@ -15,7 +14,15 @@ const MOBILE_INSTALLER_EXTENSIONS = new Set([
 const EXECUTABLE_EXTENSIONS = new Set([
   "exe", "msi", "apk", "aab", "xapk", "apks", "bat", "cmd", "com",
   "scr", "ps1", "sh", "jar", "vbs", "hta", "dmg", "pkg",
-  "deb", "rpm", "iso", "pif", "app", "ipa", "lnk"
+  "deb", "rpm", "iso", "pif", "app", "ipa", "lnk", "wsf"
+]);
+
+const ARCHIVE_EXTENSIONS = new Set([
+  "zip", "rar", "7z", "tar", "gz", "cab"
+]);
+
+const DECOY_DOCUMENT_EXTENSIONS = new Set([
+  "pdf", "doc", "docx", "xls", "xlsx", "jpg", "jpeg", "png", "txt", "mp4"
 ]);
 
 function labelEntropy(value) {
@@ -61,31 +68,28 @@ function isSensitivePathSegment(segment, previousSegment = "") {
   const lower = value.toLowerCase();
   const prev = String(previousSegment || "").toLowerCase();
 
-  // JWT pattern
   if (/^eyj[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}$/i.test(value)) return true;
-  // Hex hash (MD5 / SHA)
   if (/^[a-f0-9]{32,}$/i.test(value)) return true;
-  // Long alphanumeric token
   if (/^[a-z0-9_-]{40,}$/i.test(value) && /[a-z]/i.test(value) && /[0-9]/.test(value)) return true;
-  // UUID
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return true;
-  // High-entropy long segment
   if (value.length >= 64 && labelEntropy(value) >= 3.5) return true;
-  // Segment after a known secret route word
   if (SECRET_ROUTE_WORDS.has(prev) && value.length >= 12) return true;
-  // Inline key=value sensitive pattern
   if (/^(?:token|secret|password|code|auth|session|ticket)=[^/]+$/i.test(lower)) return true;
 
   return false;
 }
 
-/**
- * Analyze a URL path for structural and malware-delivery risk indicators.
- *
- * @param {string} rawPath
- * @param {string} [_pathname]
- * @returns {object}
- */
+function hasDoubleExtensionMasquerade(filename) {
+  const parts = String(filename || "").toLowerCase().split(".").filter(Boolean);
+  if (parts.length < 3) return false;
+  const finalExt = parts[parts.length - 1];
+  const prevExt = parts[parts.length - 2];
+  return (
+    DECOY_DOCUMENT_EXTENSIONS.has(prevExt) &&
+    (EXECUTABLE_EXTENSIONS.has(finalExt) || ARCHIVE_EXTENSIONS.has(finalExt) || finalExt === "html" || finalExt === "htm")
+  );
+}
+
 function analyzePath(rawPath, _pathname) {
   const indicators = [];
   let riskScore = 0;
@@ -106,7 +110,11 @@ function analyzePath(rawPath, _pathname) {
   }
 
   // Encoded null / LF / CR / TAB — hard block
-  if (/%(?:00|0a|0d|09)/i.test(rawPath) || /%(?:00|0a|0d|09)/i.test(decodedPath) || /[\u0000-\u001F\u007F]/.test(decodedPath)) {
+  if (
+    /%(?:00|0a|0d|09)/i.test(rawPath) ||
+    /%(?:00|0a|0d|09)/i.test(decodedPath) ||
+    /[\u0000-\u001F\u007F]/.test(decodedPath)
+  ) {
     indicators.push("ENCODED_CONTROL_CHARACTER");
     riskScore += 5;
     hardBlock = true;
@@ -127,7 +135,6 @@ function analyzePath(rawPath, _pathname) {
     riskScore += 3;
   }
 
-  // Encoded path separator
   if (/%(?:2f|5c)/i.test(rawPath)) {
     indicators.push("ENCODED_PATH_SEPARATOR");
     riskScore += 1;
@@ -161,12 +168,22 @@ function analyzePath(rawPath, _pathname) {
   const extensionMatch = finalSegment.match(/\.([a-z0-9]{1,10})$/i);
   const extension = extensionMatch ? extensionMatch[1].toLowerCase() : null;
 
+  if (hasDoubleExtensionMasquerade(finalSegment)) {
+    indicators.push("DOUBLE_EXTENSION_MASQUERADE");
+    riskScore += 8;
+    hardBlock = true;
+    hardBlockReason = hardBlockReason || "DOUBLE_EXTENSION_MASQUERADE";
+  }
+
   if (extension && MOBILE_INSTALLER_EXTENSIONS.has(extension)) {
     indicators.push("MOBILE_SIDELOAD_INSTALLER_PATH");
     indicators.push("EXECUTABLE_DOWNLOAD_PATH");
     riskScore += 5;
   } else if (extension && EXECUTABLE_EXTENSIONS.has(extension)) {
     indicators.push("EXECUTABLE_DOWNLOAD_PATH");
+    riskScore += 3;
+  } else if (extension && ARCHIVE_EXTENSIONS.has(extension)) {
+    indicators.push("ARCHIVE_DOWNLOAD_PATH");
     riskScore += 2;
   }
 
@@ -179,8 +196,12 @@ function analyzePath(rawPath, _pathname) {
     extension,
     originalPathLength: rawPath.length,
     sensitivePathSegmentCount,
-    segments // kept strictly in memory for local scamLureAnalyzer; never returned in API responses
+    segments
   };
 }
 
-module.exports = { analyzePath, isSensitivePathSegment };
+module.exports = {
+  analyzePath,
+  isSensitivePathSegment,
+  hasDoubleExtensionMasquerade
+};
