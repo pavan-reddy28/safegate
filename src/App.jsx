@@ -2,21 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
-import { ShieldCheck } from "lucide-react";
 import {
-  verifyDestination,
-  authorizeVerifiedRedirect,
-  getLocalBlockVault,
-  removeLocalBlockVaultEntry,
-  clearLocalBlockVault
-} from "./security/verificationService";
-import { ScannerPanel } from "./components/ScannerPanel";
-import { VerdictPanel } from "./components/VerdictPanel";
-import { DeviceVaultPanel } from "./components/DeviceVaultPanel";
+  ShieldCheck,
+  ShieldBan,
+  AlertTriangle,
+  PauseCircle,
+  Loader2,
+  Copy,
+  Check
+} from "lucide-react";
+import { verifyDestination } from "./security/verificationService";
 
 const isNative = Capacitor.isNativePlatform();
 
-function createRequestId() {
+function createFallbackRequestId() {
   const randomPart = globalThis.crypto?.randomUUID?.()
     ?.replaceAll("-", "")
     .slice(0, 8);
@@ -63,14 +62,6 @@ function classifyResult(result) {
     return "safe";
   }
 
-  if (
-    finalDecision === "HOLD" ||
-    finalDecision === "ERROR" ||
-    result?.verificationStatus === "INCOMPLETE"
-  ) {
-    return "hold";
-  }
-
   return "hold";
 }
 
@@ -87,15 +78,55 @@ function validateHttpUrl(rawUrl) {
   }
 }
 
+function RequestIdBadge({ value }) {
+  const [copied, setCopied] = useState(false);
+
+  if (!value) return null;
+
+  const copyRequestId = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#0b0e14] px-4 py-3 text-left">
+      <div className="min-w-0">
+        <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          Request ID
+        </div>
+        <div
+          data-testid="request-id-value"
+          className="mt-1 truncate font-mono text-xs text-slate-200"
+        >
+          {value}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={copyRequestId}
+        aria-label="Copy request ID"
+        className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
+      >
+        {copied ? (
+          <Check className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+        ) : (
+          <Copy className="h-4 w-4" aria-hidden="true" />
+        )}
+      </button>
+    </div>
+  );
+}
+
 export function App() {
   const [phase, setPhase] = useState("ready");
   const [requestId, setRequestId] = useState("");
-  const [result, setResult] = useState(null);
-  const [isBusy, setIsBusy] = useState(false);
-  const [isAuthorizing, setIsAuthorizing] = useState(false);
-  const [authError, setAuthError] = useState("");
-  const [inputError, setInputError] = useState("");
-  const [vaultItems, setVaultItems] = useState([]);
+  const [headline, setHeadline] = useState("");
 
   const destinationRef = useRef("");
   const processingRef = useRef(false);
@@ -103,141 +134,87 @@ export function App() {
   const lastReceivedAtRef = useRef(0);
   const mountedRef = useRef(true);
 
-  const refreshVault = useCallback(async () => {
-    try {
-      const items = await getLocalBlockVault();
-      if (mountedRef.current && Array.isArray(items)) {
-        setVaultItems(items);
-      }
-    } catch {
-      // Storage may be unavailable in restricted contexts
-    }
-  }, []);
-
-  const handleOpenDestination = useCallback(async (userConfirmedWarning) => {
-    const url = destinationRef.current;
+  const openDestinationDirectly = useCallback(async (targetUrl) => {
+    const url = targetUrl || destinationRef.current;
     if (!url || !validateHttpUrl(url)) {
-      setPhase("invalid");
+      if (mountedRef.current) setPhase("invalid");
       return;
     }
 
-    const token = result?.verificationToken;
-    setIsAuthorizing(true);
-    setAuthError("");
-
     try {
-      if (token) {
-        const auth = await authorizeVerifiedRedirect({
-          url,
-          verificationToken: token,
-          userConfirmedWarning
-        });
-
-        if (!auth?.authorized) {
-          if (mountedRef.current) {
-            setAuthError(
-              auth?.reasonCode === "VERIFICATION_TOKEN_ALREADY_CONSUMED"
-                ? "This one-time verification token was already used. Re-scan the link to open again."
-                : `Redirect authorization rejected (${auth?.reasonCode || "UNVERIFIED"}).`
-            );
-          }
-          return;
-        }
-      }
-
       if (isNative) {
-        await Browser.open({ url, toolbarColor: "#090b10" });
+        await Browser.open({
+          url,
+          toolbarColor: "#090b10"
+        });
       } else {
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.target = "_blank";
-        anchor.rel = "noopener noreferrer";
-        anchor.click();
-      }
-    } catch {
-      if (mountedRef.current) {
-        setAuthError("Could not launch external browser cleanly.");
-      }
-    } finally {
-      if (mountedRef.current) {
-        setIsAuthorizing(false);
-      }
-    }
-  }, [result]);
-
-  const handleIncomingUrl = useCallback(async (rawUrl) => {
-    const url = String(rawUrl || "").trim();
-    if (!url || processingRef.current) return;
-
-    setInputError("");
-    setAuthError("");
-
-    if (!validateHttpUrl(url)) {
-      setInputError("Please enter a valid HTTP or HTTPS link without embedded username/password credentials.");
-      setResult(null);
-      setRequestId(createRequestId());
-      setPhase("invalid");
-      return;
-    }
-
-    const now = Date.now();
-    if (url === lastUrlRef.current && now - lastReceivedAtRef.current < 800) {
-      return;
-    }
-    lastUrlRef.current = url;
-    lastReceivedAtRef.current = now;
-
-    const localRequestId = createRequestId();
-    destinationRef.current = url;
-    setRequestId(localRequestId);
-    setResult(null);
-
-    processingRef.current = true;
-    setIsBusy(true);
-    setPhase("checking");
-
-    try {
-      const verification = await verifyDestination(url);
-      if (!mountedRef.current) return;
-
-      setResult(verification);
-      setRequestId(getRequestId(verification, localRequestId));
-
-      const outcome = classifyResult(verification);
-      setPhase(outcome);
-
-      await refreshVault();
-
-      if (outcome === "safe" && isNative) {
-        setPhase("opening");
-        await new Promise((resolve) => window.setTimeout(resolve, 450));
-        if (!mountedRef.current) return;
-        await Browser.open({ url, toolbarColor: "#090b10" });
-        if (mountedRef.current) {
-          setPhase("safe");
-        }
+        window.location.assign(url);
       }
     } catch {
       if (mountedRef.current) {
         setPhase("hold");
       }
-    } finally {
-      processingRef.current = false;
-      if (mountedRef.current) {
-        setIsBusy(false);
-      }
     }
-  }, [refreshVault]);
+  }, []);
+
+  const handleIncomingUrl = useCallback(
+    async (rawUrl) => {
+      const url = String(rawUrl || "").trim();
+      if (!url || processingRef.current) return;
+
+      const now = Date.now();
+      if (url === lastUrlRef.current && now - lastReceivedAtRef.current < 1000) {
+        return;
+      }
+
+      lastUrlRef.current = url;
+      lastReceivedAtRef.current = now;
+
+      const localId = createFallbackRequestId();
+      destinationRef.current = url;
+      setRequestId(localId);
+      setHeadline("");
+
+      if (!validateHttpUrl(url)) {
+        setPhase("invalid");
+        return;
+      }
+
+      processingRef.current = true;
+      setPhase("checking");
+
+      try {
+        const result = await verifyDestination(url);
+        if (!mountedRef.current) return;
+
+        setRequestId(getRequestId(result, localId));
+        setHeadline(result?.riskSummary?.headline || "");
+
+        const outcome = classifyResult(result);
+
+        if (outcome === "safe") {
+          setPhase("opening");
+          await openDestinationDirectly(url);
+          if (mountedRef.current) {
+            setPhase("safe");
+          }
+          return;
+        }
+
+        setPhase(outcome);
+      } catch {
+        if (mountedRef.current) {
+          setPhase("hold");
+        }
+      } finally {
+        processingRef.current = false;
+      }
+    },
+    [openDestinationDirectly]
+  );
 
   useEffect(() => {
     mountedRef.current = true;
-    getLocalBlockVault()
-      .then((items) => {
-        if (mountedRef.current && Array.isArray(items)) {
-          setVaultItems(items);
-        }
-      })
-      .catch(() => {});
 
     const handleWindowEvent = (event) => {
       const detail = event?.detail;
@@ -245,7 +222,9 @@ export function App() {
         typeof detail === "string"
           ? detail
           : detail?.url || detail?.data?.url;
-      if (url) handleIncomingUrl(url);
+      if (url) {
+        handleIncomingUrl(url);
+      }
     };
 
     window.addEventListener("safegate:incoming-url", handleWindowEvent);
@@ -266,6 +245,15 @@ export function App() {
           }
         })
         .catch(() => {});
+    } else {
+      const queryUrl = new URLSearchParams(window.location.search).get("url");
+      if (queryUrl) {
+        queueMicrotask(() => {
+          if (mountedRef.current) {
+            handleIncomingUrl(queryUrl);
+          }
+        });
+      }
     }
 
     return () => {
@@ -273,86 +261,193 @@ export function App() {
       window.removeEventListener("safegate:incoming-url", handleWindowEvent);
       appUrlListener?.remove();
     };
-  }, [handleIncomingUrl, refreshVault]);
+  }, [handleIncomingUrl]);
 
-  const resetScreen = () => {
+  const resetToReady = () => {
     if (processingRef.current) return;
     destinationRef.current = "";
     lastUrlRef.current = "";
     setRequestId("");
-    setResult(null);
-    setAuthError("");
-    setInputError("");
+    setHeadline("");
     setPhase("ready");
   };
 
-  const handleRemoveVaultEntry = async (fingerprint) => {
-    await removeLocalBlockVaultEntry(fingerprint).catch(() => {});
-    await refreshVault();
-  };
-
-  const handleClearVault = async () => {
-    await clearLocalBlockVault().catch(() => {});
-    await refreshVault();
-  };
-
   return (
-    <div className="min-h-screen text-slate-100">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#090b10]/90 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+    <div className="flex min-h-screen flex-col text-slate-100">
+      <header className="border-b border-white/10 bg-[#090b10]/90">
+        <div className="mx-auto flex h-16 max-w-2xl items-center justify-between px-5">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-400">
               <ShieldCheck className="h-5 w-5" aria-hidden="true" />
             </div>
-            <div>
-              <span className="block text-sm font-extrabold tracking-wider text-white">
-                SAFEGATE
-              </span>
-              <span className="block text-[11px] font-medium text-slate-400">
-                On-Device URL Guard
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 font-mono text-xs text-slate-300">
-            <span className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5">
-              {isNative ? "ANDROID GUARD" : "30-LAYER ENGINE"}
+            <span className="text-sm font-extrabold tracking-widest text-white">
+              SAFEGATE
             </span>
           </div>
+
+          <span className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[11px] font-semibold text-slate-300">
+            ON-DEVICE
+          </span>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
-          <section className="rounded-2xl border border-white/10 bg-[#12161f] p-5 shadow-xl sm:p-7 lg:col-span-7">
-            {phase === "ready" ? (
-              <ScannerPanel
-                onScanUrl={handleIncomingUrl}
-                isBusy={isBusy}
-                inputError={inputError}
-              />
-            ) : (
-              <VerdictPanel
-                phase={phase}
-                result={result}
-                requestId={requestId}
-                authError={authError}
-                isAuthorizing={isAuthorizing}
-                onReset={resetScreen}
-                onAuthorizeAndOpen={handleOpenDestination}
-              />
-            )}
-          </section>
+      <main className="flex flex-1 items-center justify-center px-4 py-8">
+        <section
+          className="w-full max-w-md rounded-2xl border border-white/10 bg-[#12161f] p-6 text-center shadow-2xl sm:p-8"
+          aria-live="polite"
+        >
+          {phase === "ready" && (
+            <div className="flex flex-col items-center gap-5 py-4">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-emerald-500/35 bg-emerald-500/10 text-emerald-400">
+                <ShieldCheck className="h-10 w-10" aria-hidden="true" />
+              </div>
+              <div className="space-y-2">
+                <h1 className="text-2xl font-extrabold tracking-tight text-white">
+                  SafeGate Ready
+                </h1>
+                <p className="text-sm leading-relaxed text-slate-400">
+                  Link protection is active. Any clicked link is verified automatically on your device before opening.
+                </p>
+              </div>
+            </div>
+          )}
 
-          <div className="lg:col-span-5">
-            <DeviceVaultPanel
-              vaultItems={vaultItems}
-              isNative={isNative}
-              onRemoveEntry={handleRemoveVaultEntry}
-              onClearVault={handleClearVault}
-            />
-          </div>
-        </div>
+          {(phase === "checking" || phase === "opening") && (
+            <div className="flex flex-col items-center gap-5 py-4">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-rose-500/40 bg-rose-500/10 text-rose-400">
+                <Loader2 className="h-9 w-9 animate-spin" aria-hidden="true" />
+              </div>
+              <div className="space-y-1.5">
+                <h1 className="text-2xl font-extrabold tracking-tight text-white">
+                  {phase === "opening" ? "Opening link..." : "Verifying..."}
+                </h1>
+                <p className="text-sm text-slate-400">
+                  {phase === "opening"
+                    ? "Verified safe. Redirecting now."
+                    : "Checking link security on-device."}
+                </p>
+              </div>
+              <RequestIdBadge value={requestId} />
+            </div>
+          )}
+
+          {phase === "safe" && (
+            <div className="flex flex-col items-center gap-5 py-4">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
+                <ShieldCheck className="h-10 w-10" aria-hidden="true" />
+              </div>
+              <div className="space-y-1.5">
+                <span className="inline-block font-mono text-xs font-bold tracking-widest text-emerald-400">
+                  VERIFIED
+                </span>
+                <h1 className="text-2xl font-extrabold tracking-tight text-white">
+                  Redirected
+                </h1>
+                <p className="text-sm text-slate-400">
+                  {headline || "This link passed verification and opened safely."}
+                </p>
+              </div>
+              <RequestIdBadge value={requestId} />
+              <button
+                type="button"
+                onClick={resetToReady}
+                className="min-h-[48px] w-full cursor-pointer rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10"
+              >
+                Done
+              </button>
+            </div>
+          )}
+
+          {(phase === "blocked" || phase === "invalid") && (
+            <div className="flex flex-col items-center gap-5 py-4">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-rose-500/45 bg-rose-500/15 text-rose-400">
+                <ShieldBan className="h-10 w-10" aria-hidden="true" />
+              </div>
+              <div className="space-y-1.5">
+                <span className="inline-block font-mono text-xs font-bold tracking-widest text-rose-400">
+                  {phase === "invalid" ? "INVALID LINK" : "BLOCKED"}
+                </span>
+                <h1 className="text-2xl font-extrabold tracking-tight text-white">
+                  Link blocked
+                </h1>
+                <p className="text-sm text-slate-400">
+                  This link has been blocked for your protection.
+                </p>
+              </div>
+              <RequestIdBadge value={requestId} />
+              <button
+                type="button"
+                onClick={resetToReady}
+                className="min-h-[48px] w-full cursor-pointer rounded-xl bg-rose-600 px-5 text-sm font-bold text-white transition hover:bg-rose-500"
+              >
+                Done
+              </button>
+            </div>
+          )}
+
+          {phase === "suspicious" && (
+            <div className="flex flex-col items-center gap-5 py-4">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-amber-500/45 bg-amber-500/15 text-amber-400">
+                <AlertTriangle className="h-10 w-10" aria-hidden="true" />
+              </div>
+              <div className="space-y-1.5">
+                <span className="inline-block font-mono text-xs font-bold tracking-widest text-amber-400">
+                  SUSPICIOUS
+                </span>
+                <h1 className="text-2xl font-extrabold tracking-tight text-white">
+                  Suspicious link
+                </h1>
+                <p className="text-sm text-slate-400">
+                  This link shows suspicious patterns. Go back unless you trust the source.
+                </p>
+              </div>
+              <RequestIdBadge value={requestId} />
+              <div className="flex w-full flex-col gap-2.5 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={resetToReady}
+                  className="min-h-[48px] flex-1 cursor-pointer rounded-xl bg-white/10 px-4 text-sm font-bold text-white transition hover:bg-white/15"
+                >
+                  Go Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openDestinationDirectly()}
+                  className="min-h-[48px] flex-1 cursor-pointer rounded-xl border border-amber-500/45 bg-amber-500/15 px-4 text-sm font-bold text-amber-200 transition hover:bg-amber-500/25"
+                >
+                  Continue Anyway
+                </button>
+              </div>
+            </div>
+          )}
+
+          {phase === "hold" && (
+            <div className="flex flex-col items-center gap-5 py-4">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-sky-500/40 bg-sky-500/10 text-sky-400">
+                <PauseCircle className="h-10 w-10" aria-hidden="true" />
+              </div>
+              <div className="space-y-1.5">
+                <span className="inline-block font-mono text-xs font-bold tracking-widest text-sky-400">
+                  NOT VERIFIED
+                </span>
+                <h1 className="text-2xl font-extrabold tracking-tight text-white">
+                  Couldn&apos;t verify link
+                </h1>
+                <p className="text-sm text-slate-400">
+                  This link was held and has not been opened.
+                </p>
+              </div>
+              <RequestIdBadge value={requestId} />
+              <button
+                type="button"
+                onClick={resetToReady}
+                className="min-h-[48px] w-full cursor-pointer rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10"
+              >
+                Done
+              </button>
+            </div>
+          )}
+        </section>
       </main>
     </div>
   );
