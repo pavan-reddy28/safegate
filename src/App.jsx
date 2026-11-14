@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
-import { Browser } from "@capacitor/browser";
 import {
   ShieldCheck,
   ShieldBan,
@@ -13,18 +12,35 @@ import {
   Check,
   ExternalLink,
   ArrowLeft,
-  Lock
+  Sparkles,
+  Globe
 } from "lucide-react";
 import { verifyDestination } from "./security/verificationService.js";
+import {
+  isValidExternalHttpUrl,
+  openInExternalBrowser
+} from "./native/externalBrowser.js";
 
 const isNative = Capacitor.isNativePlatform();
 
 const SCAN_STAGES = [
-  "Layer 03/30 • Anti-Evasion & NFKC Normalization",
-  "Layer 09/30 • Homograph & Brand Spoof Shield",
-  "Layer 16/30 • APK, Cert & Archive Malware Check",
-  "Layer 20/30 • Base64, Hex & Redirect Propagator",
-  "Layer 27/30 • Cross-Layer Threat Correlator"
+  "Inspecting web address",
+  "Scanning domain trust",
+  "Checking redirect safety",
+  "Analyzing threat signals",
+  "Finalizing protection check"
+];
+
+const WAVE_DELAYS = [
+  "0ms",
+  "140ms",
+  "280ms",
+  "420ms",
+  "560ms",
+  "420ms",
+  "280ms",
+  "140ms",
+  "0ms"
 ];
 
 function createFallbackRequestId() {
@@ -77,47 +93,78 @@ function classifyResult(result) {
   return "hold";
 }
 
-function validateHttpUrl(rawUrl) {
-  try {
-    const parsed = new URL(rawUrl);
-    return (
-      ["http:", "https:"].includes(parsed.protocol) &&
-      !parsed.username &&
-      !parsed.password
-    );
-  } catch {
-    return false;
-  }
-}
-
-function getAmbientGlow(phase) {
+function getPhaseTheme(phase) {
   switch (phase) {
     case "blocked":
     case "invalid":
-      return "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(244,63,94,0.22),transparent_70%)]";
+      return {
+        primaryGlow:
+          "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(244,63,94,0.28),transparent_70%)]",
+        secondaryGlow:
+          "bg-[radial-gradient(circle_at_80%_78%,rgba(225,29,72,0.16),transparent_55%)]",
+        cardRing: "border-rose-500/25 shadow-[0_28px_90px_rgba(244,63,94,0.16)]",
+        topEdge: "via-rose-400/75"
+      };
     case "suspicious":
-      return "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(245,158,11,0.20),transparent_70%)]";
+      return {
+        primaryGlow:
+          "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(245,158,11,0.25),transparent_70%)]",
+        secondaryGlow:
+          "bg-[radial-gradient(circle_at_22%_80%,rgba(234,88,12,0.15),transparent_55%)]",
+        cardRing: "border-amber-500/25 shadow-[0_28px_90px_rgba(245,158,11,0.15)]",
+        topEdge: "via-amber-400/75"
+      };
     case "hold":
-      return "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(56,189,248,0.18),transparent_70%)]";
+      return {
+        primaryGlow:
+          "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(56,189,248,0.24),transparent_70%)]",
+        secondaryGlow:
+          "bg-[radial-gradient(circle_at_78%_75%,rgba(14,165,233,0.16),transparent_55%)]",
+        cardRing: "border-sky-400/25 shadow-[0_28px_90px_rgba(56,189,248,0.16)]",
+        topEdge: "via-sky-400/75"
+      };
     case "checking":
     case "opening":
-      return "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(99,102,241,0.20),transparent_70%)]";
+      return {
+        primaryGlow:
+          "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(99,102,241,0.26),transparent_70%)]",
+        secondaryGlow:
+          "bg-[radial-gradient(circle_at_75%_75%,rgba(34,211,238,0.18),transparent_55%)]",
+        cardRing: "border-indigo-400/30 shadow-[0_28px_90px_rgba(99,102,241,0.2)]",
+        topEdge: "via-cyan-400/80"
+      };
     default:
-      return "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(16,185,129,0.17),transparent_70%)]";
+      return {
+        primaryGlow:
+          "bg-[radial-gradient(ellipse_75%_55%_at_50%_20%,rgba(16,185,129,0.22),transparent_70%)]",
+        secondaryGlow:
+          "bg-[radial-gradient(circle_at_78%_78%,rgba(6,182,212,0.16),transparent_55%)]",
+        cardRing: "border-emerald-500/25 shadow-[0_28px_90px_rgba(16,185,129,0.16)]",
+        topEdge: "via-emerald-400/75"
+      };
   }
 }
 
 function AnimatedOrb({ phase }) {
   if (phase === "checking" || phase === "opening") {
     return (
-      <div className="relative flex h-28 w-28 items-center justify-center">
-        <div className="sg-pulse-ring absolute inset-0 rounded-full border border-indigo-400/45" />
-        <div className="sg-pulse-ring-delay absolute inset-0 rounded-full border border-cyan-400/35" />
-        <div className="sg-spin-fast absolute inset-1 rounded-full border-2 border-dashed border-indigo-400/55" />
-        <div className="sg-spin-reverse absolute inset-3.5 rounded-full border-2 border-t-cyan-400 border-r-transparent border-b-indigo-400/60 border-l-transparent" />
-        <div className="relative flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-indigo-400/45 bg-indigo-500/15 text-indigo-300 shadow-[0_0_28px_rgba(99,102,241,0.35)]">
-          <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-300 to-transparent" />
-          <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+      <div className="relative flex h-32 w-32 items-center justify-center">
+        <div className="sg-pulse-ring absolute inset-0 rounded-full border border-cyan-400/50" />
+        <div className="sg-pulse-ring-delay absolute inset-0 rounded-full border border-indigo-400/40" />
+        <div
+          className="sg-spin-fast absolute inset-1 rounded-full opacity-55"
+          style={{
+            background:
+              "conic-gradient(from 0deg, transparent 0deg, rgba(34,211,238,0.45) 55deg, transparent 110deg)"
+          }}
+        />
+        <div className="sg-spin-fast absolute inset-1.5 rounded-full border-2 border-dashed border-indigo-400/60">
+          <span className="absolute -top-1 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.95)]" />
+        </div>
+        <div className="sg-spin-reverse absolute inset-4 rounded-full border-2 border-t-cyan-300 border-r-transparent border-b-indigo-400/70 border-l-transparent" />
+        <div className="relative flex h-18 w-18 items-center justify-center overflow-hidden rounded-2xl border border-cyan-400/50 bg-gradient-to-br from-indigo-500/25 to-cyan-500/20 text-cyan-300 shadow-[0_0_35px_rgba(34,211,238,0.35)]">
+          <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-200 to-transparent shadow-[0_0_10px_#67e8f9]" />
+          <Loader2 className="h-9 w-9 animate-spin" aria-hidden="true" />
         </div>
       </div>
     );
@@ -125,11 +172,14 @@ function AnimatedOrb({ phase }) {
 
   if (phase === "blocked" || phase === "invalid") {
     return (
-      <div className="relative flex h-28 w-28 items-center justify-center">
-        <div className="sg-pulse-ring absolute inset-0 rounded-full border border-rose-500/55" />
-        <div className="sg-pulse-ring-delay absolute inset-0 rounded-full border border-rose-500/35" />
-        <div className="absolute inset-2 rounded-full border border-rose-500/30" />
-        <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-rose-500/55 bg-rose-500/15 text-rose-400 shadow-[0_0_32px_rgba(244,63,94,0.35)]">
+      <div className="relative flex h-32 w-32 items-center justify-center">
+        <div className="sg-pulse-ring absolute inset-0 rounded-full border border-rose-500/60" />
+        <div className="sg-pulse-ring-delay absolute inset-0 rounded-full border border-rose-500/40" />
+        <div className="sg-spin-slow absolute inset-2 rounded-full border border-dashed border-rose-400/45">
+          <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.9)]" />
+        </div>
+        <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-rose-500/60 bg-gradient-to-br from-rose-500/25 to-rose-900/30 text-rose-400 shadow-[0_0_38px_rgba(244,63,94,0.4)]">
+          <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-rose-300/80 to-transparent" />
           <ShieldBan className="h-10 w-10" aria-hidden="true" />
         </div>
       </div>
@@ -138,10 +188,14 @@ function AnimatedOrb({ phase }) {
 
   if (phase === "suspicious") {
     return (
-      <div className="relative flex h-28 w-28 items-center justify-center">
-        <div className="sg-pulse-ring absolute inset-0 rounded-full border border-amber-400/50" />
-        <div className="sg-spin-slow absolute inset-1.5 rounded-full border border-dashed border-amber-400/45" />
-        <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-amber-500/50 bg-amber-500/15 text-amber-400 shadow-[0_0_30px_rgba(245,158,11,0.3)]">
+      <div className="relative flex h-32 w-32 items-center justify-center">
+        <div className="sg-pulse-ring absolute inset-0 rounded-full border border-amber-400/55" />
+        <div className="sg-pulse-ring-delay absolute inset-1 rounded-full border border-orange-400/35" />
+        <div className="sg-spin-medium absolute inset-2 rounded-full border border-dashed border-amber-400/50">
+          <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.9)]" />
+        </div>
+        <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-amber-500/55 bg-gradient-to-br from-amber-500/20 to-orange-500/15 text-amber-400 shadow-[0_0_34px_rgba(245,158,11,0.32)]">
+          <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-amber-200/80 to-transparent" />
           <AlertTriangle className="h-10 w-10" aria-hidden="true" />
         </div>
       </div>
@@ -150,10 +204,15 @@ function AnimatedOrb({ phase }) {
 
   if (phase === "hold") {
     return (
-      <div className="relative flex h-28 w-28 items-center justify-center">
-        <div className="sg-spin-slow absolute inset-1.5 rounded-full border border-dashed border-sky-400/45" />
-        <div className="sg-pulse-ring absolute inset-2 rounded-full border border-sky-400/40" />
-        <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-sky-500/45 bg-sky-500/15 text-sky-400 shadow-[0_0_28px_rgba(56,189,248,0.28)]">
+      <div className="relative flex h-32 w-32 items-center justify-center">
+        <div className="sg-pulse-ring absolute inset-0 rounded-full border border-sky-400/50" />
+        <div className="sg-pulse-ring-delay absolute inset-1 rounded-full border border-cyan-400/30" />
+        <div className="sg-spin-slow absolute inset-2 rounded-full border border-dashed border-sky-400/50">
+          <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.9)]" />
+        </div>
+        <div className="sg-spin-reverse-slow absolute inset-4 rounded-full border border-sky-300/25" />
+        <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-sky-400/50 bg-gradient-to-br from-sky-500/20 to-indigo-500/15 text-sky-300 shadow-[0_0_32px_rgba(56,189,248,0.3)]">
+          <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-sky-200/80 to-transparent" />
           <ShieldAlert className="h-10 w-10" aria-hidden="true" />
         </div>
       </div>
@@ -161,11 +220,24 @@ function AnimatedOrb({ phase }) {
   }
 
   return (
-    <div className="sg-float-breathe relative flex h-28 w-28 items-center justify-center">
-      <div className="sg-pulse-ring absolute inset-0 rounded-full border border-emerald-400/45" />
-      <div className="sg-spin-slow absolute inset-1.5 rounded-full border border-dashed border-emerald-400/35" />
-      <div className="relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-emerald-500/45 bg-emerald-500/12 text-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.25)]">
-        <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-300/80 to-transparent" />
+    <div className="relative flex h-32 w-32 items-center justify-center">
+      <div className="sg-pulse-ring absolute inset-0 rounded-full border border-emerald-400/50" />
+      <div className="sg-pulse-ring-delay absolute inset-0 rounded-full border border-cyan-400/35" />
+      <div
+        className="sg-spin-slow absolute inset-1.5 rounded-full opacity-45"
+        style={{
+          background:
+            "conic-gradient(from 0deg, transparent 0deg, rgba(16,185,129,0.38) 65deg, transparent 130deg)"
+        }}
+      />
+      <div className="sg-spin-medium absolute inset-1.5 rounded-full border border-dashed border-emerald-400/45">
+        <span className="absolute -top-1 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.95)]" />
+      </div>
+      <div className="sg-spin-reverse-slow absolute inset-4 rounded-full border border-cyan-400/30">
+        <span className="absolute -bottom-1 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
+      </div>
+      <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-emerald-400/50 bg-gradient-to-br from-emerald-500/20 to-cyan-500/15 text-emerald-300 shadow-[0_0_36px_rgba(16,185,129,0.3)]">
+        <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-200 to-transparent shadow-[0_0_10px_#6ee7b7]" />
         <ShieldCheck className="h-10 w-10" aria-hidden="true" />
       </div>
     </div>
@@ -188,7 +260,7 @@ function RequestIdBadge({ value }) {
   };
 
   return (
-    <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#0b0e14]/90 px-4 py-3 text-left transition-colors hover:border-white/20">
+    <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#080b11]/90 px-4 py-3 text-left transition-colors hover:border-white/20">
       <div className="min-w-0">
         <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
           Request ID
@@ -241,24 +313,13 @@ export function App() {
 
   const openDestinationDirectly = useCallback(async (targetUrl) => {
     const url = targetUrl || destinationRef.current;
-    if (!url || !validateHttpUrl(url)) {
+    if (!url || !isValidExternalHttpUrl(url)) {
       if (mountedRef.current) setPhase("invalid");
       return;
     }
 
     try {
-      if (isNative) {
-        try {
-          await Browser.open({
-            url,
-            toolbarColor: "#090b10"
-          });
-        } catch {
-          window.location.assign(url);
-        }
-      } else {
-        window.location.assign(url);
-      }
+      await openInExternalBrowser(url);
     } catch {
       if (mountedRef.current) {
         setHoldChecksPassed(false);
@@ -288,7 +349,7 @@ export function App() {
       setDisplayHost("");
       setScanStageIdx(0);
 
-      if (!validateHttpUrl(url)) {
+      if (!isValidExternalHttpUrl(url)) {
         setPhase("invalid");
         return;
       }
@@ -302,7 +363,9 @@ export function App() {
 
         setRequestId(getRequestId(result, localId));
         setHeadline(result?.riskSummary?.headline || "");
-        setDisplayHost(result?.localVerification?.redactedDestination?.displayHost || "");
+        setDisplayHost(
+          result?.localVerification?.redactedDestination?.displayHost || ""
+        );
 
         const outcome = classifyResult(result);
 
@@ -396,26 +459,31 @@ export function App() {
     setPhase("ready");
   };
 
+  const theme = getPhaseTheme(phase);
   const cardAnimationClass =
     phase === "blocked" || phase === "invalid"
       ? "sg-alert-shake"
       : "sg-card-enter";
 
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden text-slate-100">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#07090e] text-slate-100">
       <div
         aria-hidden="true"
-        className={`pointer-events-none fixed inset-0 transition-all duration-700 ${getAmbientGlow(phase)}`}
+        className={`sg-aurora-drift pointer-events-none fixed inset-0 transition-all duration-700 ${theme.primaryGlow}`}
+      />
+      <div
+        aria-hidden="true"
+        className={`sg-aurora-drift-alt pointer-events-none fixed inset-0 transition-all duration-700 ${theme.secondaryGlow}`}
       />
       <div
         aria-hidden="true"
         className="sg-cyber-grid pointer-events-none fixed inset-0"
       />
 
-      <header className="relative z-10 border-b border-white/10 bg-[#090b10]/85 backdrop-blur-md">
+      <header className="relative z-10 border-b border-white/10 bg-[#07090e]/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-2xl items-center justify-between px-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/35 bg-emerald-500/10 text-emerald-400">
+            <div className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/40 bg-emerald-500/12 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.22)]">
               <ShieldCheck className="h-5 w-5" aria-hidden="true" />
             </div>
             <span className="text-sm font-extrabold tracking-widest text-white">
@@ -423,9 +491,10 @@ export function App() {
             </span>
           </div>
 
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[11px] font-semibold text-slate-300">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-            ON-DEVICE
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 font-mono text-[11px] font-bold tracking-wider text-emerald-300">
+            <span className="h-2 w-2 animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="-ml-4 h-2 w-2 rounded-full bg-emerald-400" />
+            SHIELD ACTIVE
           </div>
         </div>
       </header>
@@ -433,39 +502,50 @@ export function App() {
       <main className="relative z-10 flex flex-1 items-center justify-center px-4 py-8">
         <section
           key={phase}
-          className={`${cardAnimationClass} w-full max-w-md rounded-2xl border border-white/12 bg-[#12161f]/95 p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl sm:p-8`}
+          className={`${cardAnimationClass} ${theme.cardRing} relative w-full max-w-md overflow-hidden rounded-3xl border bg-[#0e131d]/92 p-6 text-center backdrop-blur-2xl sm:p-8`}
           aria-live="polite"
         >
+          <div
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent ${theme.topEdge} to-transparent`}
+          />
+
           {phase === "ready" && (
-            <div className="flex flex-col items-center gap-5 py-2">
+            <div className="flex flex-col items-center gap-6 py-3">
               <AnimatedOrb phase="ready" />
 
-              <div className="space-y-2">
-                <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-bold tracking-widest text-emerald-400">
-                  <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                  30-LAYER ZERO-EGRESS GUARD
-                </span>
-                <h1 className="text-2xl font-extrabold tracking-tight text-white">
-                  SafeGate Ready
+              <div className="space-y-2.5">
+                <div className="inline-flex items-center gap-1.5 font-mono text-[11px] font-bold tracking-[0.2em] text-emerald-400">
+                  <Sparkles className="h-3.5 w-3.5 animate-pulse" aria-hidden="true" />
+                  LIVE LINK GUARD
+                </div>
+                <h1 className="text-3xl font-extrabold tracking-tight text-white">
+                  Tap Any Link
                 </h1>
-                <p className="text-sm leading-relaxed text-slate-400">
-                  Link protection is active. Any clicked link is verified automatically on your device before opening.
+                <p className="mx-auto max-w-xs text-sm leading-relaxed text-slate-400">
+                  Unsafe destinations are stopped instantly. Clean links open straight in Chrome or your browser.
                 </p>
               </div>
 
-              <div className="grid w-full grid-cols-3 gap-2 pt-1 text-center">
-                <div className="rounded-xl border border-white/8 bg-[#0b0e14]/80 px-2 py-2.5">
-                  <div className="font-mono text-[10px] font-bold text-emerald-400">01</div>
-                  <div className="mt-0.5 text-[11px] font-semibold text-slate-300">Intercept</div>
-                </div>
-                <div className="rounded-xl border border-white/8 bg-[#0b0e14]/80 px-2 py-2.5">
-                  <div className="font-mono text-[10px] font-bold text-emerald-400">02</div>
-                  <div className="mt-0.5 text-[11px] font-semibold text-slate-300">30 Checks</div>
-                </div>
-                <div className="rounded-xl border border-white/8 bg-[#0b0e14]/80 px-2 py-2.5">
-                  <div className="font-mono text-[10px] font-bold text-emerald-400">03</div>
-                  <div className="mt-0.5 text-[11px] font-semibold text-slate-300">Zero Data Out</div>
-                </div>
+              <div
+                aria-hidden="true"
+                className="flex h-11 w-full items-center justify-center gap-1.5 rounded-2xl border border-emerald-500/15 bg-[#080b11]/85 px-5"
+              >
+                {WAVE_DELAYS.map((delay, idx) => (
+                  <span
+                    key={idx}
+                    style={{ animationDelay: delay }}
+                    className={`sg-wave-bar w-1.5 rounded-full bg-gradient-to-t from-emerald-500/70 to-cyan-300 ${
+                      idx === 4
+                        ? "h-6"
+                        : idx === 3 || idx === 5
+                          ? "h-5"
+                          : idx === 2 || idx === 6
+                            ? "h-4"
+                            : "h-2.5"
+                    }`}
+                  />
+                ))}
               </div>
             </div>
           )}
@@ -476,22 +556,22 @@ export function App() {
 
               <div className="space-y-1.5">
                 <h1 className="text-2xl font-extrabold tracking-tight text-white">
-                  {phase === "opening" ? "Opening link..." : "Verifying..."}
+                  {phase === "opening" ? "Opening in Browser..." : "Checking Link..."}
                 </h1>
                 <p className="text-sm text-slate-400">
                   {phase === "opening"
-                    ? "Verified safe. Redirecting now."
-                    : "Checking link security on-device."}
+                    ? "Link cleared. Redirecting to Chrome or your external browser."
+                    : "Scanning destination before opening."}
                 </p>
               </div>
 
-              <div className="w-full space-y-2">
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                  <div className="sg-progress-slide h-full w-2/5 rounded-full bg-gradient-to-r from-indigo-500 via-cyan-400 to-emerald-400" />
+              <div className="w-full space-y-2.5">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                  <div className="sg-progress-slide h-full w-2/5 rounded-full bg-gradient-to-r from-indigo-500 via-cyan-400 to-emerald-400 shadow-[0_0_12px_rgba(34,211,238,0.65)]" />
                 </div>
-                <div className="truncate font-mono text-[11px] text-indigo-300">
+                <div className="truncate font-mono text-[11px] font-medium text-cyan-300">
                   {phase === "opening"
-                    ? "All 30 on-device checks passed"
+                    ? "Launching external browser"
                     : SCAN_STAGES[scanStageIdx]}
                 </div>
               </div>
@@ -504,22 +584,24 @@ export function App() {
             <div className="flex flex-col items-center gap-5 py-2">
               <AnimatedOrb phase="safe" />
               <div className="space-y-1.5">
-                <span className="inline-block font-mono text-xs font-bold tracking-widest text-emerald-400">
+                <span className="inline-flex items-center gap-1.5 font-mono text-xs font-bold tracking-widest text-emerald-400">
+                  <Globe className="h-3.5 w-3.5" aria-hidden="true" />
                   VERIFIED SAFE
                 </span>
                 <h1 className="text-2xl font-extrabold tracking-tight text-white">
-                  Redirected
+                  Opened in Browser
                 </h1>
                 <p className="text-sm text-slate-400">
-                  {headline || "This link passed all 30 checks and opened safely."}
+                  {headline || "Verified safe and handed off to your browser."}
                 </p>
               </div>
               <RequestIdBadge value={requestId} />
               <button
                 type="button"
                 onClick={resetToReady}
-                className="min-h-[48px] w-full cursor-pointer rounded-xl border border-emerald-500/35 bg-emerald-500/15 px-5 text-sm font-bold text-emerald-200 transition hover:bg-emerald-500/25 active:scale-[0.98]"
+                className="relative min-h-[48px] w-full cursor-pointer overflow-hidden rounded-xl border border-emerald-400/40 bg-emerald-500/18 px-5 text-sm font-bold text-emerald-100 transition hover:bg-emerald-500/28 active:scale-[0.98]"
               >
+                <span className="sg-shimmer-sweep pointer-events-none absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
                 Done
               </button>
             </div>
@@ -533,18 +615,21 @@ export function App() {
                   {phase === "invalid" ? "INVALID LINK" : "BLOCKED"}
                 </span>
                 <h1 className="text-2xl font-extrabold tracking-tight text-white">
-                  Link blocked
+                  Link Blocked
                 </h1>
                 <p className="text-sm text-slate-400">
-                  This link has been blocked for your protection.
+                  {phase === "invalid"
+                    ? "Malformed or unsupported link stopped safely."
+                    : "Dangerous link stopped before it could open."}
                 </p>
               </div>
               <RequestIdBadge value={requestId} />
               <button
                 type="button"
                 onClick={resetToReady}
-                className="min-h-[48px] w-full cursor-pointer rounded-xl bg-rose-600 px-5 text-sm font-bold text-white shadow-[0_8px_24px_rgba(225,29,72,0.35)] transition hover:bg-rose-500 active:scale-[0.98]"
+                className="relative min-h-[48px] w-full cursor-pointer overflow-hidden rounded-xl bg-rose-600 px-5 text-sm font-bold text-white shadow-[0_10px_28px_rgba(225,29,72,0.4)] transition hover:bg-rose-500 active:scale-[0.98]"
               >
+                <span className="sg-shimmer-sweep pointer-events-none absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/25 to-transparent" />
                 Done
               </button>
             </div>
@@ -558,10 +643,10 @@ export function App() {
                   SUSPICIOUS
                 </span>
                 <h1 className="text-2xl font-extrabold tracking-tight text-white">
-                  Suspicious link
+                  Caution Advised
                 </h1>
                 <p className="text-sm text-slate-400">
-                  This link shows suspicious patterns. Go back unless you trust the source.
+                  Unusual link patterns detected. Only open in browser if you trust the source.
                 </p>
               </div>
               <RequestIdBadge value={requestId} />
@@ -577,7 +662,7 @@ export function App() {
                 <button
                   type="button"
                   onClick={() => openDestinationDirectly()}
-                  className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/15 px-4 text-sm font-bold text-amber-200 transition hover:bg-amber-500/25 active:scale-[0.98]"
+                  className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-amber-400/50 bg-amber-500/18 px-4 text-sm font-bold text-amber-100 transition hover:bg-amber-500/28 active:scale-[0.98]"
                 >
                   Open Anyway
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
@@ -591,22 +676,22 @@ export function App() {
               {holdChecksPassed ? (
                 <AnimatedOrb phase="hold" />
               ) : (
-                <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-sky-500/40 bg-sky-500/10 text-sky-400">
-                  <PauseCircle className="h-10 w-10" aria-hidden="true" />
+                <div className="relative flex h-24 w-24 items-center justify-center rounded-2xl border border-sky-400/40 bg-sky-500/12 text-sky-400">
+                  <PauseCircle className="h-11 w-11" aria-hidden="true" />
                 </div>
               )}
 
               <div className="space-y-1.5">
                 <span className="inline-block font-mono text-xs font-bold tracking-widest text-sky-400">
-                  {holdChecksPassed ? "PASSED 30 CHECKS • HELD" : "NOT VERIFIED"}
+                  {holdChecksPassed ? "UNVERIFIED SITE" : "NOT VERIFIED"}
                 </span>
                 <h1 className="text-2xl font-extrabold tracking-tight text-white">
-                  {holdChecksPassed ? "Unverified domain" : "Couldn't verify link"}
+                  {holdChecksPassed ? "Proceed with caution" : "Verification paused"}
                 </h1>
                 <p className="text-sm text-slate-400">
                   {holdChecksPassed
-                    ? `${displayHost ? `${displayHost} passed` : "Passed"} all 30 on-device checks, but isn't on the official allow-list.`
-                    : "This link was held and has not been opened."}
+                    ? `${displayHost || "This domain"} shows no active threat signals, but isn't a recognized brand.`
+                    : "Could not complete link verification."}
                 </p>
               </div>
 
@@ -625,8 +710,9 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => openDestinationDirectly()}
-                    className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-sky-500/45 bg-sky-500/15 px-4 text-sm font-bold text-sky-200 transition hover:bg-sky-500/25 active:scale-[0.98]"
+                    className="relative inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl border border-sky-400/50 bg-sky-500/18 px-4 text-sm font-bold text-sky-100 transition hover:bg-sky-500/28 active:scale-[0.98]"
                   >
+                    <span className="sg-shimmer-sweep pointer-events-none absolute inset-y-0 w-14 bg-gradient-to-r from-transparent via-white/15 to-transparent" />
                     Open Anyway
                     <ExternalLink className="h-4 w-4" aria-hidden="true" />
                   </button>

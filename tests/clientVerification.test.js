@@ -127,3 +127,14 @@ test("verificationService never degrades to HOLD on storage failure or malformed
     globalThis.fetch = originalFetch;
   }
 });
+
+test("externalBrowser validates strict http/https URLs before launching Chrome or external browser", async () => {
+  const { isValidExternalHttpUrl } = await import("../src/native/externalBrowser.js");
+
+  assert.equal(isValidExternalHttpUrl("https://api.pavanserver.me/healthy"), true);
+  assert.equal(isValidExternalHttpUrl("http://example.org/path"), true);
+  assert.equal(isValidExternalHttpUrl("javascript:alert(1)"), false);
+  assert.equal(isValidExternalHttpUrl("intent://scan/#Intent;end"), false);
+  assert.equal(isValidExternalHttpUrl("https://user:pass@example.com/"), false);
+  assert.equal(isValidExternalHttpUrl("file:///etc/passwd"), false);
+});

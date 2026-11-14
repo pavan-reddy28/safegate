@@ -8,7 +8,7 @@
 @layer base {
   :root {
     color-scheme: dark;
-    background-color: #090b10;
+    background-color: #07090e;
     color: #f1f5f9;
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
@@ -19,7 +19,7 @@
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
-    background-color: #090b10;
+    background-color: #07090e;
     overflow-x: hidden;
   }
 
@@ -51,32 +51,32 @@
 
 @keyframes sg-pulse-ring {
   0% {
-    transform: scale(0.92);
-    opacity: 0.7;
+    transform: scale(0.82);
+    opacity: 0.75;
   }
-  70% {
-    transform: scale(1.28);
+  75% {
+    transform: scale(1.36);
     opacity: 0;
   }
   100% {
-    transform: scale(1.28);
+    transform: scale(1.36);
     opacity: 0;
   }
 }
 
 @keyframes sg-scan-sweep {
   0% {
-    transform: translateY(-28px);
+    transform: translateY(-34px);
     opacity: 0;
   }
   18% {
-    opacity: 0.9;
+    opacity: 0.95;
   }
   82% {
-    opacity: 0.9;
+    opacity: 0.95;
   }
   100% {
-    transform: translateY(28px);
+    transform: translateY(34px);
     opacity: 0;
   }
 }
@@ -84,7 +84,7 @@
 @keyframes sg-card-enter {
   0% {
     opacity: 0;
-    transform: translateY(10px) scale(0.975);
+    transform: translateY(14px) scale(0.96);
   }
   100% {
     opacity: 1;
@@ -95,17 +95,17 @@
 @keyframes sg-alert-shake {
   0% {
     opacity: 0;
-    transform: scale(0.94);
+    transform: scale(0.93);
   }
-  30% {
+  28% {
     opacity: 1;
-    transform: translateX(-5px) scale(1.01);
+    transform: translateX(-6px) scale(1.015);
   }
-  55% {
-    transform: translateX(4px) scale(1);
+  52% {
+    transform: translateX(5px) scale(1);
   }
-  78% {
-    transform: translateX(-2px);
+  74% {
+    transform: translateX(-3px);
   }
   100% {
     transform: translateX(0);
@@ -115,81 +115,157 @@
 @keyframes sg-float-breathe {
   0%,
   100% {
-    transform: translateY(0);
+    transform: translateY(0px) scale(1);
   }
   50% {
-    transform: translateY(-4px);
+    transform: translateY(-5px) scale(1.02);
+  }
+}
+
+@keyframes sg-aurora-drift {
+  0%,
+  100% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translate3d(4%, 3%, 0) scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes sg-aurora-drift-alt {
+  0%,
+  100% {
+    transform: translate3d(3%, 2%, 0) scale(1.05);
+    opacity: 0.65;
+  }
+  50% {
+    transform: translate3d(-4%, -3%, 0) scale(0.95);
+    opacity: 0.9;
   }
 }
 
 @keyframes sg-progress-slide {
   0% {
-    transform: translateX(-100%);
+    transform: translateX(-110%);
   }
   100% {
-    transform: translateX(260%);
+    transform: translateX(270%);
+  }
+}
+
+@keyframes sg-wave-bar {
+  0%,
+  100% {
+    transform: scaleY(0.32);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes sg-btn-shimmer {
+  0% {
+    transform: translateX(-140%) skewX(-18deg);
+  }
+  100% {
+    transform: translateX(260%) skewX(-18deg);
   }
 }
 
 .sg-spin-slow {
-  animation: sg-spin-slow 12s linear infinite;
+  animation: sg-spin-slow 11s linear infinite;
+}
+
+.sg-spin-medium {
+  animation: sg-spin-slow 5.5s linear infinite;
 }
 
 .sg-spin-fast {
-  animation: sg-spin-slow 2.2s linear infinite;
+  animation: sg-spin-slow 1.9s linear infinite;
 }
 
 .sg-spin-reverse {
-  animation: sg-spin-reverse 3.4s linear infinite;
+  animation: sg-spin-reverse 3.2s linear infinite;
+}
+
+.sg-spin-reverse-slow {
+  animation: sg-spin-reverse 15s linear infinite;
 }
 
 .sg-pulse-ring {
-  animation: sg-pulse-ring 2.4s cubic-bezier(0.2, 0.8, 0.4, 1) infinite;
+  animation: sg-pulse-ring 2.6s cubic-bezier(0.18, 0.85, 0.35, 1) infinite;
 }
 
 .sg-pulse-ring-delay {
-  animation: sg-pulse-ring 2.4s cubic-bezier(0.2, 0.8, 0.4, 1) 1.2s infinite;
+  animation: sg-pulse-ring 2.6s cubic-bezier(0.18, 0.85, 0.35, 1) 1.3s infinite;
 }
 
 .sg-scan-sweep {
-  animation: sg-scan-sweep 1.8s ease-in-out infinite;
+  animation: sg-scan-sweep 1.85s ease-in-out infinite;
 }
 
 .sg-card-enter {
-  animation: sg-card-enter 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: sg-card-enter 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .sg-alert-shake {
-  animation: sg-alert-shake 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sg-alert-shake 0.46s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .sg-float-breathe {
-  animation: sg-float-breathe 3.8s ease-in-out infinite;
+  animation: sg-float-breathe 3.6s ease-in-out infinite;
+}
+
+.sg-aurora-drift {
+  animation: sg-aurora-drift 9s ease-in-out infinite;
+}
+
+.sg-aurora-drift-alt {
+  animation: sg-aurora-drift-alt 12s ease-in-out infinite;
 }
 
 .sg-progress-slide {
-  animation: sg-progress-slide 1.3s ease-in-out infinite;
+  animation: sg-progress-slide 1.25s ease-in-out infinite;
+}
+
+.sg-wave-bar {
+  transform-origin: center;
+  animation: sg-wave-bar 1.55s ease-in-out infinite;
+}
+
+.sg-shimmer-sweep {
+  animation: sg-btn-shimmer 2.8s ease-in-out infinite;
 }
 
 .sg-cyber-grid {
   background-image:
-    linear-gradient(to right, rgba(148, 163, 184, 0.045) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
-  background-size: 36px 36px;
-  mask-image: radial-gradient(ellipse 75% 65% at 50% 42%, black 20%, transparent 100%);
+    linear-gradient(to right, rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 44%, black 18%, transparent 100%);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sg-spin-slow,
+  .sg-spin-medium,
   .sg-spin-fast,
   .sg-spin-reverse,
+  .sg-spin-reverse-slow,
   .sg-pulse-ring,
   .sg-pulse-ring-delay,
   .sg-scan-sweep,
   .sg-card-enter,
   .sg-alert-shake,
   .sg-float-breathe,
-  .sg-progress-slide {
+  .sg-aurora-drift,
+  .sg-aurora-drift-alt,
+  .sg-progress-slide,
+  .sg-wave-bar,
+  .sg-shimmer-sweep {
     animation: none !important;
   }
 }

@@ -46,4 +46,30 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="http" />
+        </intent>
+        <package android:name="com.android.chrome" />
+        <package android:name="com.chrome.beta" />
+        <package android:name="com.chrome.dev" />
+        <package android:name="com.chrome.canary" />
+        <package android:name="com.brave.browser" />
+        <package android:name="org.mozilla.firefox" />
+        <package android:name="org.mozilla.fenix" />
+        <package android:name="com.microsoft.emmx" />
+        <package android:name="com.sec.android.app.sbrowser" />
+        <package android:name="com.opera.browser" />
+        <package android:name="com.duckduckgo.mobile.android" />
+        <package android:name="com.kiwibrowser.browser" />
+        <package android:name="com.vivaldi.browser" />
+    </queries>
 </manifest>
