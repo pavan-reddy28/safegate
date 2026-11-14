@@ -11,10 +11,19 @@ const MOBILE_INSTALLER_EXTENSIONS = new Set([
   "apk", "aab", "xapk", "apks", "ipa"
 ]);
 
+const MOBILE_CONFIG_AND_CERT_EXTENSIONS = new Set([
+  "mobileconfig", "provisionprofile", "cer", "crt", "pem", "der", "ovpn", "p12", "pfx"
+]);
+
+const INTERACTIVE_SMUGGLING_EXTENSIONS = new Set([
+  "svg", "shtml", "xhtml", "mhtml", "mht", "hta"
+]);
+
 const EXECUTABLE_EXTENSIONS = new Set([
   "exe", "msi", "apk", "aab", "xapk", "apks", "bat", "cmd", "com",
   "scr", "ps1", "sh", "jar", "vbs", "hta", "dmg", "pkg",
-  "deb", "rpm", "iso", "pif", "app", "ipa", "lnk", "wsf"
+  "deb", "rpm", "iso", "img", "vhd", "vhdx", "one", "msix", "appx", "appxbundle",
+  "crx", "xpi", "reg", "scf", "url", "pif", "app", "ipa", "lnk", "wsf"
 ]);
 
 const ARCHIVE_EXTENSIONS = new Set([
@@ -22,8 +31,12 @@ const ARCHIVE_EXTENSIONS = new Set([
 ]);
 
 const DECOY_DOCUMENT_EXTENSIONS = new Set([
-  "pdf", "doc", "docx", "xls", "xlsx", "jpg", "jpeg", "png", "txt", "mp4"
+  "pdf", "doc", "docx", "xls", "xlsx", "csv", "ppt", "pptx", "rtf",
+  "jpg", "jpeg", "png", "gif", "webp", "heic", "svg", "txt", "mp4", "zip"
 ]);
+
+const PHISHING_KIT_ENDPOINT_PATTERN =
+  /(?:\/cgi-bin\/webscr|\/owa\/auth\/logon|\/wp-admin\/install|\/vendor\/phpunit\/|\/\.git\/|\/\.env(?:$|[/?#])|\/cdn-cgi\/l\/)/i;
 
 function labelEntropy(value) {
   if (!value) return 0;
@@ -121,12 +134,20 @@ function analyzePath(rawPath, _pathname) {
     hardBlockReason = "ENCODED_CONTROL_CHARACTER";
   }
 
-  // Encoded XSS / HTML script injection in path
-  if (/<script\b|javascript:|onerror\s*=|onload\s*=/i.test(decodedPath)) {
+  // Encoded XSS / HTML script injection / HTML smuggling in path
+  if (/<script\b|javascript:|onerror\s*=|onload\s*=|data:text\/html/i.test(decodedPath)) {
     indicators.push("INJECTED_SCRIPT_IN_PATH");
     riskScore += 6;
     hardBlock = true;
     hardBlockReason = hardBlockReason || "INJECTED_SCRIPT_IN_PATH";
+  }
+
+  // Known phishing kit / exposed credential/backdoor endpoint paths
+  if (PHISHING_KIT_ENDPOINT_PATTERN.test(decodedPath)) {
+    indicators.push("PHISHING_KIT_ENDPOINT_FINGERPRINT");
+    riskScore += 6;
+    hardBlock = true;
+    hardBlockReason = hardBlockReason || "PHISHING_KIT_ENDPOINT_FINGERPRINT";
   }
 
   // Path traversal
@@ -178,8 +199,8 @@ function analyzePath(rawPath, _pathname) {
     riskScore += 5;
   }
 
-  const finalSegment = segments.at(-1) || "";
-  const extensionMatch = finalSegment.match(/\.([a-z0-9]{1,10})$/i);
+  const finalSegment = (segments.at(-1) || "").replace(/[\s.]+$/g, "");
+  const extensionMatch = finalSegment.match(/\.([a-z0-9]{1,18})$/i);
   const extension = extensionMatch ? extensionMatch[1].toLowerCase() : null;
 
   if (hasDoubleExtensionMasquerade(finalSegment)) {
@@ -193,6 +214,12 @@ function analyzePath(rawPath, _pathname) {
     indicators.push("MOBILE_SIDELOAD_INSTALLER_PATH");
     indicators.push("EXECUTABLE_DOWNLOAD_PATH");
     riskScore += 5;
+  } else if (extension && MOBILE_CONFIG_AND_CERT_EXTENSIONS.has(extension)) {
+    indicators.push("MOBILE_CONFIG_OR_CERT_INSTALL_PATH");
+    riskScore += 6;
+  } else if (extension && INTERACTIVE_SMUGGLING_EXTENSIONS.has(extension)) {
+    indicators.push("INTERACTIVE_SMUGGLING_FILE_PATH");
+    riskScore += 4;
   } else if (extension && EXECUTABLE_EXTENSIONS.has(extension)) {
     indicators.push("EXECUTABLE_DOWNLOAD_PATH");
     riskScore += 3;

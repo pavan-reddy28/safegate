@@ -137,6 +137,22 @@ const KNOWN_SAFE_REGISTRABLE_DOMAINS = new Set([
   "who.int"
 ]);
 
+// Safe first-party domains that also host user-created files, redirects, or forms
+// (clean HTTPS pages are KNOWN_SAFE, but downloads, forms & query redirects are NEVER skipped).
+const USER_CONTENT_BEARING_SAFE_DOMAINS = new Set([
+  "github.com",
+  "gitlab.com",
+  "google.com",
+  "google.co.in",
+  "youtube.com",
+  "facebook.com",
+  "fb.com",
+  "linkedin.com",
+  "adobe.com",
+  "office.com",
+  "live.com"
+]);
+
 // Well-known, authoritative public infrastructure/DNS IPs (HTTPS clean requests only).
 const KNOWN_SAFE_PUBLIC_IPS = new Set([
   "1.1.1.1",
@@ -184,11 +200,18 @@ function isTrustedSoftwareReleaseDomain(registrableDomain) {
   return TRUSTED_SOFTWARE_RELEASE_DOMAINS.has(registrableDomain.toLowerCase().trim());
 }
 
+function isUserContentSafeDomain(registrableDomain) {
+  if (!registrableDomain || typeof registrableDomain !== "string") return false;
+  return USER_CONTENT_BEARING_SAFE_DOMAINS.has(registrableDomain.toLowerCase().trim());
+}
+
 module.exports = {
   isKnownSafeDomain,
   isKnownSafePublicIp,
   isTrustedSoftwareReleaseDomain,
+  isUserContentSafeDomain,
   KNOWN_SAFE_REGISTRABLE_DOMAINS,
   KNOWN_SAFE_PUBLIC_IPS,
-  TRUSTED_SOFTWARE_RELEASE_DOMAINS
+  TRUSTED_SOFTWARE_RELEASE_DOMAINS,
+  USER_CONTENT_BEARING_SAFE_DOMAINS
 };

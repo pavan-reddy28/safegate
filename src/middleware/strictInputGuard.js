@@ -12,13 +12,16 @@ const MAX_URL_BYTES = 4096;
 const DANGEROUS_SCHEME_PATTERN =
   /^(?:javascript|data|vbscript|file|content|android-app|intent|upi|paytmmp|phonepe|tez|gpay|bhim|whatsapp|tg|tel|sms|smsto|mmsto|mailto|callto|facetime|geo|market|blob|filesystem|about|view-source|smb|sftp|ftp|chrome|edge):/i;
 
+const INVISIBLE_SPOOF_CHARS =
+  /[\u202A-\u202E\u2066-\u2069\u200B-\u200F\u2060-\u2064\uFEFF\u061C\u3164\uFFA0\u115F\u1160\u180E]/;
+
 const FORBIDDEN_URL_PATTERNS = [
   // Null bytes (raw or percent-encoded)
   /\x00|%00/i,
 
-  // RTL / bidi override & zero-width spoofing characters (raw or UTF-8 percent-encoded)
-  /[\u202A-\u202E\u2066-\u2069\u200F\u061C]/,
-  /%e2%80%(?:8[b-f]|a[a-e])|%e2%81%a[6-9]|%ef%bb%bf/i,
+  // RTL / bidi override, Hangul fillers, & zero-width spoofing characters (raw or UTF-8 percent-encoded)
+  INVISIBLE_SPOOF_CHARS,
+  /%e2%80%(?:8[b-f]|a[a-e])|%e2%81%a[0-9]|%ef%bb%bf|%e3%85%a4|%ef%be%a0/i,
 
   // C1 control characters
   /[\x80-\x9F]/
@@ -47,14 +50,28 @@ function validateUrlString(req, res, url) {
     return false;
   }
 
-  // Strip ASCII whitespace/control/zero-width characters when probing scheme (blocks java\tscript:, upi\u200B:)
-  const schemeProbe = url.replace(/[\u0000-\u0020\u200B-\u200F\uFEFF]/g, "");
+  // Apply NFKC when probing scheme so fullwidth chars (e.g. ｊａｖａｓｃｒｉｐｔ：) cannot slip past
+  const schemeProbe = url
+    .normalize("NFKC")
+    .replace(/[\u0000-\u0020\u200B-\u200F\uFEFF\u3164\uFFA0]/g, "");
   if (DANGEROUS_SCHEME_PATTERN.test(schemeProbe)) {
     res.status(400).json({
       requestId: req.requestId,
       error: {
         code: "FORBIDDEN_URL_CONTENT",
         message: "The submitted value contains a blocked or unsafe URI scheme."
+      }
+    });
+    return false;
+  }
+
+  // Detect combining diacritic flood used to obfuscate deceptive domains/paths
+  if (/[\u0300-\u036f]{3,}/.test(url)) {
+    res.status(400).json({
+      requestId: req.requestId,
+      error: {
+        code: "FORBIDDEN_URL_CONTENT",
+        message: "The submitted value contains forbidden obfuscating characters."
       }
     });
     return false;

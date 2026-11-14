@@ -46,6 +46,18 @@ const URGENCY_KYC_LURE_TERMS = [
   "techsupport", "browserupdate", "chromeupdate", "flashupdate", "trojanalert"
 ];
 
+const REMOTE_ACCESS_TROJAN_TERMS = [
+  "anydesk", "teamviewer", "quicksupport", "rustdesk", "airdroid",
+  "screenshare", "remotesupport", "remotedesktop", "accessibilityservice",
+  "enableaccessibility", "unknownsources", "playprotect"
+];
+
+const DIGITAL_ARREST_EXTORTION_TERMS = [
+  "digitalarrest", "cybercrime", "arrestwarrant", "courtnotice",
+  "simdeactivate", "aadhaarlock", "panlink", "epfokyc",
+  "collectrequest", "upimandate", "autopay", "receivepayment", "scanqr"
+];
+
 const CREDENTIAL_HARVEST_TERMS = [
   "upipin", "mpin", "atmpin", "enterpin", "verifypin", "pinverify",
   "cvv", "cardverify", "cardnumber", "verifyotp", "otpverify",
@@ -105,7 +117,10 @@ function analyzeScamLures({
   parsedUrl,
   existingIndicators = []
 }) {
-  const hasMobileInstaller = existingIndicators.includes("MOBILE_SIDELOAD_INSTALLER_PATH");
+  const hasMobileInstaller =
+    existingIndicators.includes("MOBILE_SIDELOAD_INSTALLER_PATH") ||
+    existingIndicators.includes("MOBILE_CONFIG_OR_CERT_INSTALL_PATH") ||
+    existingIndicators.includes("INTERACTIVE_SMUGGLING_FILE_PATH");
 
   if (
     isKnownSafeDomain(registrableDomain) &&
@@ -137,6 +152,8 @@ function analyzeScamLures({
   const financialHits = findMatches(splitTokens, compact, FINANCIAL_CREDIT_LURE_TERMS);
   const kycHits = findMatches(splitTokens, compact, URGENCY_KYC_LURE_TERMS);
   const harvestHits = findMatches(splitTokens, compact, CREDENTIAL_HARVEST_TERMS);
+  const ratHits = findMatches(splitTokens, compact, REMOTE_ACCESS_TROJAN_TERMS);
+  const extortionHits = findMatches(splitTokens, compact, DIGITAL_ARREST_EXTORTION_TERMS);
 
   const pathJoined = (Array.isArray(pathSegments) ? pathSegments : []).join(" ");
   const pathTokenInfo = tokenizeCompact(pathJoined);
@@ -162,7 +179,17 @@ function analyzeScamLures({
     riskScore += 5;
   }
 
-  if (pathBrandHit && (financialHits > 0 || kycHits > 0 || harvestHits > 0 || genericAuthPathHit)) {
+  if (ratHits > 0) {
+    indicators.push("REMOTE_ACCESS_TROJAN_SCAM_LURE");
+    riskScore += 5;
+  }
+
+  if (extortionHits > 0) {
+    indicators.push("DIGITAL_ARREST_OR_EXTORTION_SCAM_LURE");
+    riskScore += 5;
+  }
+
+  if (pathBrandHit && (financialHits > 0 || kycHits > 0 || harvestHits > 0 || ratHits > 0 || extortionHits > 0 || genericAuthPathHit)) {
     indicators.push("BRAND_IMPERSONATION_WITH_SCAM_LURE_IN_PATH");
     riskScore += 4;
   }
@@ -181,7 +208,9 @@ function analyzeScamLures({
     existingIndicators.includes("DECEPTIVE_AUTH_HOSTNAME_PATTERN") ||
     existingIndicators.includes("EXCESSIVE_HYPHEN_LURE_DOMAIN");
 
-  const hasAndroidApk = existingIndicators.includes("MOBILE_SIDELOAD_INSTALLER_PATH");
+  const hasAndroidApk =
+    existingIndicators.includes("MOBILE_SIDELOAD_INSTALLER_PATH") ||
+    existingIndicators.includes("MOBILE_CONFIG_OR_CERT_INSTALL_PATH");
   const hasArchive = existingIndicators.includes("ARCHIVE_DOWNLOAD_PATH");
   const hasTunnelOrIp =
     existingIndicators.includes("FREE_TUNNEL_OR_DYNAMIC_DNS_HOST") ||
@@ -194,7 +223,12 @@ function analyzeScamLures({
   const hasDga = existingIndicators.includes("HIGH_ENTROPY_DGA_DOMAIN");
   const hasSensitiveQuery = existingIndicators.includes("SENSITIVE_QUERY_PARAMETERS_DETECTED");
 
-  const hasScamLure = financialHits > 0 || kycHits > 0 || harvestHits > 0;
+  const hasScamLure =
+    financialHits > 0 ||
+    kycHits > 0 ||
+    harvestHits > 0 ||
+    ratHits > 0 ||
+    extortionHits > 0;
 
   let hardBlock = false;
   let hardBlockReason = null;
@@ -214,6 +248,9 @@ function analyzeScamLures({
   } else if (hasAndroidApk && (hasScamLure || hasTunnelOrIp || hasAbusedCloudHosting || hasHighRiskTld || hasHttp || pathBrandHit)) {
     hardBlock = true;
     hardBlockReason = "MALICIOUS_APK_DELIVERY_PATTERN";
+  } else if (ratHits > 0 && (hasAndroidApk || hasArchive || hasTunnelOrIp || hasAbusedCloudHosting || hasHighRiskTld || hasHttp || pathBrandHit || genericAuthPathHit || kycHits > 0 || extortionHits > 0)) {
+    hardBlock = true;
+    hardBlockReason = "REMOTE_ACCESS_TROJAN_SCAM_BLOCKED";
   } else if (hasArchive && (hasScamLure || hasHighRiskTld || hasTunnelOrIp || pathBrandHit || hasAbusedCloudHosting)) {
     hardBlock = true;
     hardBlockReason = "MALICIOUS_ARCHIVE_DELIVERY_PATTERN";

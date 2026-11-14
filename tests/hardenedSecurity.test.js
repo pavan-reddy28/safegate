@@ -354,6 +354,89 @@ test("Blocks Android content://, payment deep-links, and tab-obfuscated javascri
   }
 });
 
+test("Blocks open-redirect bypass attempts via known-safe redirectors (google.com/url?q=...) and preserves Google search", async () => {
+  const legitSearch = await verifyUrl("https://www.google.com/search?q=weather", "req-google-search");
+  assert.equal(legitSearch.finalDecision, "KNOWN_SAFE");
+
+  const openRedirectLookalike = await verifyUrl(
+    "https://www.google.com/url?q=https%3A%2F%2Fpaypa1-mirror.com%2Fhome",
+    "req-google-redir-warn"
+  );
+  assert.notEqual(openRedirectLookalike.finalDecision, "KNOWN_SAFE");
+  assert.ok(["SUSPICIOUS", "BLOCK"].includes(openRedirectLookalike.finalDecision));
+
+  const openRedirectKit = await verifyUrl(
+    "https://www.google.com/url?q=https%3A%2F%2Funseen-domain-example.com%2Fwp-content%2Fuploads%2Flogin.php",
+    "req-google-redir-kit"
+  );
+  assert.equal(openRedirectKit.finalDecision, "BLOCK");
+});
+
+test("Blocks fragment smuggling, triple-encoded redirects, and Base64 HTML-smuggling payloads", () => {
+  const fragUrl = analyzeUrl("https://example.org/view#http://192.168.1.1/admin");
+  assert.equal(fragUrl.decision, "BLOCK");
+
+  const b64Html = Buffer.from("<script>window.location=atob('aHR0cDovL2V2aWwuY29t')</script>", "utf8").toString("base64");
+  const htmlSmuggle = analyzeUrl(`https://example.org/doc?payload=${encodeURIComponent(b64Html)}`);
+  assert.equal(htmlSmuggle.decision, "BLOCK");
+  assert.equal(htmlSmuggle.reasonCodes[0], "HTML_SMUGGLING_PAYLOAD_DETECTED");
+
+  const fragB64Redirect = Buffer.from("javascript:alert(document.cookie)", "utf8").toString("base64");
+  const fragSmuggle = analyzeUrl(`https://example.org/viewer#${fragB64Redirect}`);
+  assert.equal(fragSmuggle.decision, "BLOCK");
+
+  const fragKeyPair = analyzeUrl("https://example.org/app#url=upi://pay?pa=scam@okicici&am=5000");
+  assert.equal(fragKeyPair.decision, "BLOCK");
+});
+
+test("Blocks rogue mobileconfig / CA certs, RAT AnyDesk scams, Digital Arrest scams, and UPI web collect traps", () => {
+  const rogueProfile = analyzeUrl("https://rewards-claim.top/vpn-update.mobileconfig");
+  assert.equal(rogueProfile.decision, "BLOCK");
+
+  const rogueCertIp = analyzeUrl("https://45.133.1.2/security/root-ca.crt");
+  assert.equal(rogueCertIp.decision, "BLOCK");
+
+  const ratScam = analyzeUrl("https://support-help-desk.top/anydesk-quicksupport/kyc-update");
+  assert.equal(ratScam.decision, "BLOCK");
+
+  const digitalArrest = analyzeUrl("https://cybercrime-notice-desk.top/digitalarrest/warrant-verify");
+  assert.equal(digitalArrest.decision, "BLOCK");
+
+  const upiWebCollect = analyzeUrl("https://cashback-offer-2026.xyz/claim?pa=scammer@okaxis&am=19999");
+  assert.equal(upiWebCollect.decision, "BLOCK");
+  assert.ok(upiWebCollect.indicators.includes("UPI_PAYMENT_REQUEST_SMUGGLING_IN_URL"));
+});
+
+test("Blocks mobile viewport subdomain spoofing, phishing kit endpoints, accented/Turkish homographs, Hangul fillers, and IP+port compound attacks", () => {
+  const viewportSpoof = analyzeUrl(
+    "https://www.sbi-online-netbanking-secure-verification-portal.attacker99.com/login"
+  );
+  assert.equal(viewportSpoof.decision, "BLOCK");
+  assert.ok(viewportSpoof.indicators.includes("MOBILE_VIEWPORT_SUBDOMAIN_PADDING"));
+
+  const kitEndpoint = analyzeUrl("https://unknown-merchant.org/cgi-bin/webscr?cmd=_login-run");
+  assert.equal(kitEndpoint.decision, "BLOCK");
+  assert.equal(kitEndpoint.reasonCodes[0], "PHISHING_KIT_ENDPOINT_FINGERPRINT");
+
+  const accentedPayPal = analyzeUrl(`https://${domainToASCII("p\u00E0ypal.com")}/verify-account`);
+  assert.equal(accentedPayPal.decision, "BLOCK");
+  assert.ok(accentedPayPal.indicators.includes("CONFUSABLE_HOMOGRAPH_BRAND_IMPERSONATION"));
+
+  const hangulEvasion = analyzeUrl("https://example.org/login\u3164verify");
+  assert.equal(hangulEvasion.decision, "BLOCK");
+  assert.equal(hangulEvasion.reasonCodes[0], "INVISIBLE_OR_BIDI_CHARACTERS_FOUND");
+
+  const fullwidthScheme = analyzeUrl("ｊａｖａｓｃｒｉｐｔ:alert(1)");
+  assert.equal(fullwidthScheme.decision, "BLOCK");
+
+  const ipWebmail = analyzeUrl("https://93.184.216.34:8443/webmail");
+  assert.equal(ipWebmail.decision, "BLOCK");
+
+  const ipPortCompound = analyzeUrl("https://93.184.216.34:8443/status");
+  assert.equal(ipPortCompound.decision, "BLOCK");
+  assert.equal(ipPortCompound.reasonCodes[0], "COMPOUND_DIRECT_IP_ATTACK");
+});
+
 // --------------------------------------------------
 // 2. OFFICIAL BANKING & ZERO-EGRESS PRIVACY GUARANTEES
 // --------------------------------------------------

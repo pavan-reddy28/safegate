@@ -7,11 +7,11 @@ const { evaluateLexicalAndStructuralRisk } = require("./lexicalRiskEngine");
 const { isBlockedHost } = require("./localThreatList");
 
 const REDIRECT_PARAMETERS = new Set([
-  "url", "uri", "u", "r", "redirect", "redirecturl", "redirecturi",
-  "redirectto", "redir", "return", "returnto", "returnurl", "ret", "returl",
+  "url", "uri", "u", "r", "q", "rd", "redirect", "redirecturl", "redirecturi",
+  "redirectto", "redir", "redirurl", "return", "returnto", "returnurl", "ret", "returl",
   "next", "nexturl", "continue", "continueurl", "dest", "desturl", "destination",
   "target", "targeturl", "goto", "go", "jump", "callback", "out", "to",
-  "forward", "fallback", "successurl", "failurl",
+  "forward", "fallback", "successurl", "failurl", "clickurl", "adurl", "linkurl",
   "postlogoutredirecturi", "logouturi", "canceluri", "link", "href"
 ]);
 
@@ -41,7 +41,7 @@ function normalizeKey(key) {
     .replace(/[^a-z0-9]/g, "");
 }
 
-function decodeRepeatedly(value, maximumPasses = 2) {
+function decodeRepeatedly(value, maximumPasses = 3) {
   let current = String(value ?? "");
   let additionalDecodes = 0;
 
@@ -67,6 +67,28 @@ function decodeRepeatedly(value, maximumPasses = 2) {
   };
 }
 
+const HTML_SMUGGLING_CODE_PATTERN =
+  /<script\b|<form\b|atob\s*\(|createObjectURL|document\.write|window\.location|location\.replace|fromCharCode/i;
+
+function classifyDecodedPayload(decodedRaw, kind) {
+  const trimmed = String(decodedRaw || "").trim();
+  const decodedUri = decodeRepeatedly(trimmed, 2).value.trim();
+  const candidates = [trimmed, decodedUri];
+
+  for (const cand of candidates) {
+    if (HTML_SMUGGLING_CODE_PATTERN.test(cand)) {
+      return { decoded: cand, kind, htmlSmuggling: true };
+    }
+    if (
+      /^(?:https?:\/\/|\/\/|\\\\[a-z0-9])/i.test(cand) ||
+      DANGEROUS_SCHEME.test(cand.replace(/[\u0000-\u0020\u200B-\u200F\uFEFF\u007f]/g, ""))
+    ) {
+      return { decoded: cand, kind, htmlSmuggling: false };
+    }
+  }
+  return null;
+}
+
 function tryDecodeSmuggledUrl(value) {
   const trimmed = String(value || "").trim();
   if (trimmed.length < 12 || trimmed.length > 2048) return null;
@@ -76,12 +98,8 @@ function tryDecodeSmuggledUrl(value) {
     try {
       const normalized = trimmed.replace(/-/g, "+").replace(/_/g, "/");
       const decoded = Buffer.from(normalized, "base64").toString("utf8").trim();
-      if (
-        /^(?:https?:\/\/|\/\/)/i.test(decoded) ||
-        DANGEROUS_SCHEME.test(decoded.replace(/[\u0000-\u0020\u007f]/g, ""))
-      ) {
-        return { decoded, kind: "BASE64" };
-      }
+      const match = classifyDecodedPayload(decoded, "BASE64");
+      if (match) return match;
     } catch {
       // ignore
     }
@@ -91,12 +109,8 @@ function tryDecodeSmuggledUrl(value) {
   if (trimmed.length >= 24 && trimmed.length % 2 === 0 && /^[0-9a-f]+$/i.test(trimmed)) {
     try {
       const decoded = Buffer.from(trimmed, "hex").toString("utf8").trim();
-      if (
-        /^(?:https?:\/\/|\/\/)/i.test(decoded) ||
-        DANGEROUS_SCHEME.test(decoded.replace(/[\u0000-\u0020\u007f]/g, ""))
-      ) {
-        return { decoded, kind: "HEX" };
-      }
+      const match = classifyDecodedPayload(decoded, "HEX");
+      if (match) return match;
     } catch {
       // ignore
     }
@@ -156,6 +170,11 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
     state.indicators.push(
       smuggled.kind === "HEX" ? "HEX_SMUGGLED_REDIRECT" : "BASE64_SMUGGLED_REDIRECT"
     );
+    if (smuggled.htmlSmuggling) {
+      state.indicators.push("HTML_SMUGGLING_PAYLOAD_DETECTED");
+      state.hardBlockReason = "HTML_SMUGGLING_PAYLOAD_DETECTED";
+      return;
+    }
     state.riskScore += 2;
     inspectRedirectCandidate(smuggled.decoded, state, depth + 1);
     return;
@@ -194,7 +213,7 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
     return;
   }
 
-  // Run full path analysis on nested redirect hop (catches redirects to .apk, double-ext, etc.)
+  // Run full path analysis on nested redirect hop (catches redirects to .apk, double-ext, certs, etc.)
   const nestedPathAnalysis = analyzePath(nested.parsedUrl.pathname || "/");
   if (nestedPathAnalysis.hardBlock) {
     state.indicators.push("NESTED_REDIRECT_MALICIOUS_PATH");
@@ -205,6 +224,12 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
   if (nestedPathAnalysis.indicators.includes("MOBILE_SIDELOAD_INSTALLER_PATH")) {
     state.indicators.push("NESTED_REDIRECT_TO_MOBILE_INSTALLER");
     state.hardBlockReason = "NESTED_REDIRECT_TO_MOBILE_INSTALLER";
+    return;
+  }
+
+  if (nestedPathAnalysis.indicators.includes("MOBILE_CONFIG_OR_CERT_INSTALL_PATH")) {
+    state.indicators.push("NESTED_REDIRECT_TO_MOBILE_CONFIG_OR_CERT");
+    state.hardBlockReason = "NESTED_REDIRECT_TO_MOBILE_CONFIG_OR_CERT";
     return;
   }
 
@@ -248,9 +273,33 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
     return;
   }
 
+  // Propagate aggregate nested risk score across domain, path, scam, and lexical layers
+  // (prevents open redirects on safe domains like google.com/url?q= from scrubbing threat scores)
+  const nestedTotalScore =
+    nestedDomainAnalysis.riskScore +
+    nestedPathAnalysis.riskScore +
+    nestedScam.riskScore +
+    nestedLexical.riskScore;
+
+  if (nestedTotalScore >= 7) {
+    state.indicators.push("NESTED_REDIRECT_HIGH_RISK_TARGET");
+    state.blockedNestedDestinationCount++;
+    state.hardBlockReason = "NESTED_REDIRECT_HIGH_RISK_TARGET";
+    return;
+  }
+
   if (nestedDomainAnalysis.riskScore >= 4) {
     state.indicators.push("SUSPICIOUS_NESTED_REDIRECT_DOMAIN");
-    state.riskScore += nestedDomainAnalysis.riskScore;
+  }
+
+  if (nestedTotalScore >= 3) {
+    state.indicators.push("NESTED_REDIRECT_RISK_PROPAGATED");
+    state.riskScore += nestedTotalScore;
+    for (const nestedInd of [...nestedIndicators, ...nestedScam.indicators, ...nestedLexical.indicators]) {
+      if (nestedInd !== "SENSITIVE_QUERY_PARAMETERS_DETECTED" && nestedInd !== "SENSITIVE_QUERY_PARAMETER_PRESENT") {
+        state.indicators.push(nestedInd);
+      }
+    }
   }
 
   state.indicators.push("NESTED_REDIRECT_DESTINATION_INSPECTED");
@@ -333,7 +382,7 @@ function analyzeQuery(parsedUrl) {
       trackingParameterCount++;
     }
 
-    const decoded = decodeRepeatedly(value, 2);
+    const decoded = decodeRepeatedly(value, 3);
 
     if (decoded.decodingFailed) {
       state.indicators.push("QUERY_VALUE_ENCODING_ERROR");
@@ -367,8 +416,13 @@ function analyzeQuery(parsedUrl) {
           state.indicators.push(
             smuggled.kind === "HEX" ? "HEX_SMUGGLED_URL_IN_QUERY" : "BASE64_SMUGGLED_URL_IN_QUERY"
           );
-          state.riskScore += 2;
-          inspectRedirectCandidate(smuggled.decoded, state, 1);
+          if (smuggled.htmlSmuggling) {
+            state.indicators.push("HTML_SMUGGLING_PAYLOAD_DETECTED");
+            state.hardBlockReason = "HTML_SMUGGLING_PAYLOAD_DETECTED";
+          } else {
+            state.riskScore += 2;
+            inspectRedirectCandidate(smuggled.decoded, state, 1);
+          }
         } else if (hasDoubleExtensionMasquerade(trimmedVal)) {
           state.indicators.push("DOUBLE_EXTENSION_MASQUERADE");
           state.hardBlockReason = "DOUBLE_EXTENSION_MASQUERADE";
@@ -381,6 +435,17 @@ function analyzeQuery(parsedUrl) {
     }
   }
 
+  // Detect UPI collect-request / mandate smuggling parameters inside a web URL query (pa=<vpa@bank> + am/pn/mc/tr)
+  const paVal = parsedUrl.searchParams.get("pa");
+  if (
+    paVal &&
+    /^[a-z0-9._-]+@[a-z0-9.-]+$/i.test(paVal.trim()) &&
+    (parsedUrl.searchParams.has("am") || parsedUrl.searchParams.has("pn") || parsedUrl.searchParams.has("tr"))
+  ) {
+    state.indicators.push("UPI_PAYMENT_REQUEST_SMUGGLING_IN_URL");
+    state.riskScore += 5;
+  }
+
   if (trackingParameterCount > 0) {
     state.indicators.push("TRACKING_PARAMETERS_DETECTED");
   }
@@ -389,11 +454,14 @@ function analyzeQuery(parsedUrl) {
   let fragmentHasSensitiveMaterial = false;
 
   if (parsedUrl.hash) {
-    const fragment = decodeRepeatedly(parsedUrl.hash.slice(1), 2);
-    fragmentHasUrl = /https?:\/\//i.test(fragment.value);
+    const rawFragment = parsedUrl.hash.slice(1);
+    const fragment = decodeRepeatedly(rawFragment, 3);
+    const fragTrimmed = fragment.value.trim();
+
+    fragmentHasUrl = /https?:\/\//i.test(fragTrimmed);
     fragmentHasSensitiveMaterial =
-      /(?:access_token|id_token|token|code|state|session)=/i.test(fragment.value) ||
-      /^eyj[a-z0-9_-]{8,}\./i.test(fragment.value);
+      /(?:access_token|id_token|token|code|state|session)=/i.test(fragTrimmed) ||
+      /^eyj[a-z0-9_-]{8,}\./i.test(fragTrimmed);
 
     if (fragmentHasUrl) {
       state.indicators.push("URL_PRESENT_IN_FRAGMENT");
@@ -402,6 +470,47 @@ function analyzeQuery(parsedUrl) {
     if (fragmentHasSensitiveMaterial) {
       state.indicators.push("SENSITIVE_FRAGMENT_PARAMETER_PRESENT");
       state.indicators.push("SENSITIVE_FRAGMENT_DETECTED");
+    }
+
+    // Inspect dangerous schemes, URLs, or Base64/Hex smuggling hidden in #fragment
+    const fragSchemeProbe = fragTrimmed.replace(/[\u0000-\u0020\u200B-\u200F\uFEFF\u007f]/g, "");
+    if (DANGEROUS_SCHEME.test(fragSchemeProbe)) {
+      state.indicators.push("FRAGMENT_SMUGGLED_REDIRECT_OR_PAYLOAD");
+      state.indicators.push("DANGEROUS_REDIRECT_SCHEME");
+      state.hardBlockReason = "DANGEROUS_REDIRECT_SCHEME";
+    } else if (/^(?:https?:\/\/|\/\/|\\\\[a-z0-9])/i.test(fragTrimmed)) {
+      state.indicators.push("FRAGMENT_SMUGGLED_REDIRECT_OR_PAYLOAD");
+      inspectRedirectCandidate(fragTrimmed, state, 1);
+    } else {
+      const smuggledFrag = tryDecodeSmuggledUrl(fragTrimmed);
+      if (smuggledFrag) {
+        state.indicators.push("FRAGMENT_SMUGGLED_REDIRECT_OR_PAYLOAD");
+        if (smuggledFrag.htmlSmuggling) {
+          state.indicators.push("HTML_SMUGGLING_PAYLOAD_DETECTED");
+          state.hardBlockReason = "HTML_SMUGGLING_PAYLOAD_DETECTED";
+        } else {
+          state.riskScore += 3;
+          inspectRedirectCandidate(smuggledFrag.decoded, state, 1);
+        }
+      } else if (fragTrimmed.includes("=")) {
+        try {
+          const fragParams = new URLSearchParams(fragTrimmed);
+          for (const [fKey, fVal] of fragParams.entries()) {
+            const normFKey = normalizeKey(fKey);
+            const fValTrimmed = String(fVal || "").trim();
+            if (
+              REDIRECT_PARAMETERS.has(normFKey) ||
+              /^(?:https?:\/\/|\/\/)/i.test(fValTrimmed) ||
+              DANGEROUS_SCHEME.test(fValTrimmed.replace(/[\u0000-\u0020\u200B-\u200F\uFEFF\u007f]/g, ""))
+            ) {
+              state.indicators.push("FRAGMENT_SMUGGLED_REDIRECT_OR_PAYLOAD");
+              inspectRedirectCandidate(fValTrimmed, state, 1);
+            }
+          }
+        } catch {
+          // ignore malformed fragment pairs
+        }
+      }
     }
   }
 

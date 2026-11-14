@@ -6,6 +6,7 @@ const { analyzePath } = require("./pathAnalyzer");
 const { analyzeQuery } = require("./queryAnalyzer");
 const { analyzeScamLures } = require("./scamLureAnalyzer");
 const { evaluateLexicalAndStructuralRisk } = require("./lexicalRiskEngine");
+const { correlateCrossLayerThreats } = require("./compoundThreatCorrelator");
 const { buildRedactedDestination } = require("./privacyGuard");
 const { isKnownSafeDomain } = require("./knownSafeDomains");
 const { isFreeUgcOrCloudHosting } = require("./localThreatList");
@@ -120,20 +121,37 @@ function analyzeUrl(input) {
     existingIndicators: midIndicators
   });
 
-  const allIndicators = [
+  const preCorrelationIndicators = [
     ...new Set([...midIndicators, ...lexicalAnalysis.indicators])
   ];
 
   if (lexicalAnalysis.hardBlock) {
-    return blocked(lexicalAnalysis.hardBlockReason, allIndicators);
+    return blocked(lexicalAnalysis.hardBlockReason, preCorrelationIndicators);
   }
 
-  const riskScore =
+  const preCorrelationScore =
     domainAnalysis.riskScore +
     effectivePathRiskScore +
     queryAnalysis.riskScore +
     scamAnalysis.riskScore +
     lexicalAnalysis.riskScore;
+
+  // Layer 7: Cross-layer compound threat correlator (blocks hybrid multi-tactic evasions)
+  const correlation = correlateCrossLayerThreats({
+    indicators: preCorrelationIndicators,
+    totalRiskScore: preCorrelationScore,
+    isSafeFirstParty
+  });
+
+  const allIndicators = [
+    ...new Set([...preCorrelationIndicators, ...correlation.indicators])
+  ];
+
+  if (correlation.hardBlock) {
+    return blocked(correlation.hardBlockReason, allIndicators);
+  }
+
+  const riskScore = preCorrelationScore + correlation.riskScore;
 
   if (riskScore >= LOCAL_BLOCK_SCORE_THRESHOLD) {
     return blocked("HIGH_RISK_SCORE_LOCAL_BLOCK", allIndicators);

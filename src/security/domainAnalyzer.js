@@ -33,6 +33,11 @@ const DANGEROUS_PORTS = new Set([
   "6379", "6667", "31337"
 ]);
 
+const SUSPICIOUS_SERVICE_PORTS = new Set([
+  "1337", "2082", "2083", "2086", "2087", "2095", "2096",
+  "5000", "6666", "7777", "8000", "8080", "8443", "8888", "9000", "9999"
+]);
+
 const BRAND_DOMAINS = {
   // Global Tech, Cloud, Email & Collaboration
   microsoft: new Set([
@@ -208,7 +213,13 @@ const CONFUSABLE_CHAR_MAP = {
   "\u03C1": "p", "\u03A1": "p",
   "\u03C4": "t", "\u03A4": "t",
   "\u03C5": "u", "\u03A5": "y",
-  "\u03C7": "x", "\u03A7": "x"
+  "\u03C7": "x", "\u03A7": "x",
+  // Turkish dotless i, Latin extended, Roman numerals & IPA lookalikes
+  "\u0131": "i", "\u0130": "i", "\u0142": "l", "\u0141": "l",
+  "\u00F8": "o", "\u00D8": "o", "\u0111": "d", "\u00F0": "d",
+  "\u00DF": "s", "\u217C": "l", "\u216C": "l", "\u2170": "i",
+  "\u0251": "a", "\u0261": "g", "\u0269": "i", "\u026A": "i",
+  "\u029F": "l", "\u028F": "y", "\u050D": "k", "\u051B": "q"
 };
 
 function toConfusableSkeleton(hostname) {
@@ -221,7 +232,14 @@ function toConfusableSkeleton(hostname) {
       out += CONFUSABLE_CHAR_MAP[ch];
       hadConfusable = true;
     } else {
-      out += ch;
+      // Strip combining marks (e.g. accented Latin lookalikes like pàypal / gòogle)
+      const nfd = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (nfd !== ch && /^[a-z0-9]$/.test(nfd)) {
+        out += nfd;
+        hadConfusable = true;
+      } else {
+        out += ch;
+      }
     }
   }
 
@@ -672,6 +690,20 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
         indicators.push("EXCESSIVE_HYPHEN_LURE_DOMAIN");
         riskScore += 3;
       }
+
+      // Mobile browser viewport truncation attack: overly long subdomain stuffing keywords/brand before real domain
+      const subdomainPrefix =
+        registrableDomain && host.length > registrableDomain.length
+          ? host.slice(0, host.length - registrableDomain.length - 1)
+          : "";
+      if (
+        subdomainPrefix &&
+        ((subdomainPrefix.length >= 28 && (deceptiveMatches.size >= 1 || indicators.includes("BRAND_NAME_IN_UNRELATED_DOMAIN"))) ||
+          subdomainPrefix.length >= 44)
+      ) {
+        indicators.push("MOBILE_VIEWPORT_SUBDOMAIN_PADDING");
+        riskScore += 4;
+      }
     }
   }
 
@@ -683,6 +715,10 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
   if (parsedUrl.port) {
     indicators.push("NON_STANDARD_PORT");
     riskScore += 2;
+    if (SUSPICIOUS_SERVICE_PORTS.has(String(parsedUrl.port))) {
+      indicators.push("SUSPICIOUS_SERVICE_PORT");
+      riskScore += 2;
+    }
   }
 
   const uniqueIndicators = [...new Set(indicators)];

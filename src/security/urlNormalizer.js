@@ -5,13 +5,13 @@ const MAX_URL_LENGTH = 4096;
 // C0/C1 control characters
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F]/;
 
-// Invisible zero-width and Unicode bidi override spoofing characters
+// Invisible zero-width, Hangul filler, and Unicode bidi override spoofing characters
 const INVISIBLE_OR_BIDI_CHARS =
-  /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u061C]/;
+  /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u061C\u3164\uFFA0\u115F\u1160\u180E]/;
 
-// Percent-encoded null/CRLF or UTF-8 bidi overrides (%E2%80%AA..%E2%80%AE, %E2%81%A6..%E2%81%A9)
+// Percent-encoded null/CRLF, UTF-8 bidi overrides, zero-width, or Hangul fillers
 const ENCODED_SPOOF_SEQUENCES =
-  /(?:%00|%e2%80%8[b-f]|%e2%80%a[a-e]|%e2%81%a[6-9]|%ef%bb%bf)/i;
+  /(?:%00|%e2%80%8[b-f]|%e2%80%a[a-e]|%e2%81%a[0-9]|%ef%bb%bf|%e3%85%a4|%ef%be%a0)/i;
 
 const MALFORMED_PERCENT_ENCODING = /%(?![0-9a-fA-F]{2})/;
 
@@ -79,6 +79,11 @@ function normalizeUrl(input) {
     return reject("INVISIBLE_OR_BIDI_CHARACTERS_FOUND");
   }
 
+  // Reject combining-mark floods or fullwidth ASCII spoofs (e.g., ＠ ／ ｈｔｔｐ)
+  if (/[\u0300-\u036f]{3,}/.test(input) || /[\uFF01-\uFF5E]/.test(input)) {
+    return reject("UNICODE_SPOOF_CHARACTERS_FOUND");
+  }
+
   const candidate = input.trim();
 
   if (!candidate) {
@@ -104,18 +109,21 @@ function normalizeUrl(input) {
     return reject("MALFORMED_PERCENT_ENCODING");
   }
 
-  // Reject percent-encoded null bytes / bidi direction overrides / zero-width chars.
+  // Reject percent-encoded null bytes / bidi direction overrides / zero-width / Hangul fillers.
   if (ENCODED_SPOOF_SEQUENCES.test(candidate)) {
     return reject("ENCODED_SPOOF_OR_NULL_SEQUENCE");
   }
 
   // Block dangerous schemes explicitly with a clear reason code.
-  if (DANGEROUS_EXPLICIT_SCHEME.test(candidate)) {
+  if (DANGEROUS_EXPLICIT_SCHEME.test(candidate.normalize("NFKC"))) {
     return reject("UNSUPPORTED_OR_DANGEROUS_SCHEME");
   }
 
-  // Require an explicit HTTP or HTTPS URL.
-  if (!/^https?:\/\//i.test(candidate)) {
+  // Require an explicit HTTP or HTTPS URL (and disallow extra empty slash like https:///evil.com).
+  if (!/^https?:\/\/[^/]/i.test(candidate)) {
+    if (/^https?:\/\//i.test(candidate)) {
+      return reject("INVALID_HOSTNAME");
+    }
     return reject("ABSOLUTE_HTTP_URL_REQUIRED");
   }
 
@@ -132,6 +140,11 @@ function normalizeUrl(input) {
   // Reject userinfo/authority confusion immediately (including percent-encoded @ in userinfo).
   if (rawAuthority.includes("@") || /%40/i.test(rawAuthority)) {
     return reject("URL_CONTAINS_CREDENTIALS");
+  }
+
+  // Reject IPv6 zone identifiers (e.g. [fe80::1%25eth0]) which confuse host parsers
+  if (rawAuthority.startsWith("[") && rawAuthority.includes("%")) {
+    return reject("INVALID_IP_ADDRESS");
   }
 
   let parsedUrl;

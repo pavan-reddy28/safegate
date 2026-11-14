@@ -32,21 +32,21 @@
  *   - A fresh batch of 5 more requests can be sent after 5 seconds of silence.
  */
 
-const BUCKET_CAPACITY   = 5;
-const REFILL_RATE       = 1;        // tokens per second
-const COST_PER_REQUEST  = 1;
-const MAX_BUCKETS       = 256;      // prevent unbounded memory growth
-const PRUNE_INTERVAL_MS = 60_000;   // remove stale buckets every minute
+const HEADER_BUCKET_CAPACITY = 5;
+const IP_BUCKET_CAPACITY     = 20;
+const REFILL_RATE            = 1;        // tokens per second
+const COST_PER_REQUEST       = 1;
+const MAX_BUCKETS            = 256;      // prevent unbounded memory growth
+const PRUNE_INTERVAL_MS      = 60_000;   // remove stale buckets every minute
 
-/** @type {Map<string, {tokens: number, lastRefill: number}>} */
+/** @type {Map<string, {tokens: number, lastRefill: number, capacity: number}>} */
 const buckets = new Map();
 
 function pruneStale() {
   const now = Date.now();
   for (const [key, bucket] of buckets) {
-    // A bucket idle for more than 2× the window is considered stale.
     const idleSec = (now - bucket.lastRefill) / 1000;
-    if (idleSec > BUCKET_CAPACITY / REFILL_RATE * 2) {
+    if (idleSec > (bucket.capacity / REFILL_RATE) * 2) {
       buckets.delete(key);
     }
   }
@@ -54,58 +54,63 @@ function pruneStale() {
 
 setInterval(pruneStale, PRUNE_INTERVAL_MS).unref();
 
-function getSourceKey(req) {
-  // The Android app may send X-Request-Source: <device-id-hash>.
-  // We accept it only if it looks like a hex string (no raw identifiers).
+function getSourceKeys(req) {
+  const ipKey = `ip:${req.ip || "unknown"}`;
   const header = req.headers["x-request-source"];
   if (header && /^[a-f0-9]{8,64}$/i.test(header)) {
-    return `hdr:${header.slice(0, 64).toLowerCase()}`;
+    return [
+      { key: `hdr:${header.slice(0, 64).toLowerCase()}`, capacity: HEADER_BUCKET_CAPACITY },
+      { key: ipKey, capacity: IP_BUCKET_CAPACITY }
+    ];
   }
-  return `ip:${req.ip || "unknown"}`;
+  return [{ key: ipKey, capacity: HEADER_BUCKET_CAPACITY }];
 }
 
 function refill(bucket) {
   const now = Date.now();
   const elapsed = (now - bucket.lastRefill) / 1000;
   bucket.tokens = Math.min(
-    BUCKET_CAPACITY,
+    bucket.capacity,
     bucket.tokens + elapsed * REFILL_RATE
   );
   bucket.lastRefill = now;
 }
 
-/**
- * Express middleware.  Responds 429 when the per-source token bucket is empty.
- */
-function burstGuardMiddleware(req, res, next) {
-  const key = getSourceKey(req);
-
+function takeToken(key, capacity) {
   let bucket = buckets.get(key);
-
   if (!bucket) {
     if (buckets.size >= MAX_BUCKETS) {
-      // Evict the first (oldest inserted) entry.
       const oldest = buckets.keys().next().value;
       if (oldest !== undefined) buckets.delete(oldest);
     }
-
-    bucket = { tokens: BUCKET_CAPACITY, lastRefill: Date.now() };
+    bucket = { tokens: capacity, lastRefill: Date.now(), capacity };
     buckets.set(key, bucket);
   }
 
   refill(bucket);
-
   if (bucket.tokens < COST_PER_REQUEST) {
-    return res.status(429).json({
-      requestId: req.requestId,
-      error: {
-        code: "BURST_RATE_LIMITED",
-        message: "Too many requests in a short time. Please wait a moment."
-      }
-    });
+    return false;
   }
-
   bucket.tokens -= COST_PER_REQUEST;
+  return true;
+}
+
+/**
+ * Express middleware. Responds 429 when either the source-header or IP token bucket is exhausted.
+ */
+function burstGuardMiddleware(req, res, next) {
+  const keys = getSourceKeys(req);
+  for (const { key, capacity } of keys) {
+    if (!takeToken(key, capacity)) {
+      return res.status(429).json({
+        requestId: req.requestId,
+        error: {
+          code: "BURST_RATE_LIMITED",
+          message: "Too many requests in a short time. Please wait a moment."
+        }
+      });
+    }
+  }
   next();
 }
 

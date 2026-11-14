@@ -49,6 +49,15 @@ const INTENT_VECTORS = {
   DOC_PHISH_KIT: [
     "docusign", "esign", "document", "sharedfile", "viewdoc", "attachment",
     "statement", "taxform", "remittance", "remit", "payroll", "hrdoc"
+  ],
+  REMOTE_ACCESS_TROJAN: [
+    "anydesk", "teamviewer", "quicksupport", "rustdesk", "airdroid",
+    "screenshare", "remotesupport", "remotedesktop", "accessibility",
+    "unknownsources", "playprotect"
+  ],
+  GOVT_EXTORTION: [
+    "digitalarrest", "cybercrime", "warrant", "courtnotice", "simdeactivate",
+    "trai", "aadhaarlock", "panlink", "collectrequest", "upimandate", "autopay"
   ]
 };
 
@@ -189,8 +198,17 @@ function evaluateLexicalAndStructuralRisk({
   pathSegments,
   existingIndicators = []
 }) {
+  const hasRiskyArtifact =
+    existingIndicators.includes("MOBILE_SIDELOAD_INSTALLER_PATH") ||
+    existingIndicators.includes("MOBILE_CONFIG_OR_CERT_INSTALL_PATH") ||
+    existingIndicators.includes("INTERACTIVE_SMUGGLING_FILE_PATH") ||
+    existingIndicators.includes("FRAGMENT_SMUGGLED_REDIRECT_OR_PAYLOAD") ||
+    existingIndicators.includes("HTML_SMUGGLING_PAYLOAD_DETECTED");
+
   const isSafeFirstParty =
-    isKnownSafeDomain(registrableDomain) && !isFreeUgcOrCloudHosting(hostname);
+    isKnownSafeDomain(registrableDomain) &&
+    !isFreeUgcOrCloudHosting(hostname) &&
+    !hasRiskyArtifact;
 
   if (isSafeFirstParty) {
     return {
