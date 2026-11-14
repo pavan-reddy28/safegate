@@ -58,7 +58,7 @@ const EXPLICIT_MALICE_STEMS = [
 ];
 
 const EMBEDDED_TLD_SUBDOMAIN_PATTERN =
-  /\.(?:com|net|org|info|biz|co|in|uk|us|ca|au|de|fr|jp|sg|gov|edu|bank|pay|app|io)\./i;
+  /(?:^|\.)[a-z0-9-]{2,}\.(?:com|net|org|info|biz|gov|edu|co\.in|co\.uk|com\.au|org\.in|gov\.in|bank)(?:\.|$)/i;
 
 const COMPROMISED_ASSET_DIR_KIT =
   /\/(?:wp-content|wp-includes|wp-admin|images|img|css|js|fonts|assets|static|media|cgi-bin|\.well-known)\/.*\.(?:php|html?|hta|phtml|asp|aspx)$/i;
@@ -249,7 +249,7 @@ function evaluateLexicalAndStructuralRisk({
       ? hostname.slice(0, hostname.length - registrableDomain.length - 1)
       : "";
 
-  if (subdomainPart && EMBEDDED_TLD_SUBDOMAIN_PATTERN.test(`.${subdomainPart}.`)) {
+  if (subdomainPart && EMBEDDED_TLD_SUBDOMAIN_PATTERN.test(subdomainPart)) {
     indicators.push("UNIVERSAL_SUBDOMAIN_TLD_MASQUERADING");
     riskScore += 8;
   }

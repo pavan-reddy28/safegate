@@ -46,6 +46,7 @@ app.use(helmet({
   // Never leak referrers.
   referrerPolicy: { policy: "no-referrer" },
   crossOriginResourcePolicy: { policy: "same-origin" },
+  crossOriginOpenerPolicy: { policy: "same-origin" },
   // Tight CSP — this is a JSON API, not a web app.
   contentSecurityPolicy: {
     directives: {
@@ -54,6 +55,14 @@ app.use(helmet({
     }
   }
 }));
+
+app.use((_req, res, next) => {
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=()"
+  );
+  next();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CORS

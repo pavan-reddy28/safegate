@@ -35,7 +35,8 @@ function issueRedirectToken({ url, finalDecision, recommendedAction, requestId }
   const allowedToIssue =
     recommendedAction === "ALLOW" ||
     recommendedAction === "ALLOW_WITH_CAUTION" ||
-    recommendedAction === "WARN_USER";
+    recommendedAction === "WARN_USER" ||
+    recommendedAction === "HOLD";
 
   if (!allowedToIssue) {
     return null;
@@ -103,7 +104,7 @@ function verifyRedirectToken({ url, token, userConfirmedWarning = false }) {
     return { authorized: false, reasonCode: "URL_BINDING_MISMATCH" };
   }
 
-  if (payload.act === "DO_NOT_OPEN" || payload.dec === "BLOCK" || payload.dec === "HOLD") {
+  if (payload.act === "DO_NOT_OPEN" || payload.dec === "BLOCK") {
     return {
       authorized: false,
       reasonCode: "REDIRECT_BLOCKED_BY_VERDICT",
@@ -115,6 +116,14 @@ function verifyRedirectToken({ url, token, userConfirmedWarning = false }) {
     return {
       authorized: false,
       reasonCode: "USER_WARNING_CONFIRMATION_REQUIRED",
+      finalDecision: payload.dec
+    };
+  }
+
+  if ((payload.act === "HOLD" || payload.dec === "HOLD") && !userConfirmedWarning) {
+    return {
+      authorized: false,
+      reasonCode: "HOLD_REPUTATION_UNAVAILABLE_CONFIRMATION_REQUIRED",
       finalDecision: payload.dec
     };
   }

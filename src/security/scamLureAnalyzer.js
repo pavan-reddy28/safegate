@@ -105,7 +105,13 @@ function analyzeScamLures({
   parsedUrl,
   existingIndicators = []
 }) {
-  if (isKnownSafeDomain(registrableDomain) && !isFreeUgcOrCloudHosting(hostname)) {
+  const hasMobileInstaller = existingIndicators.includes("MOBILE_SIDELOAD_INSTALLER_PATH");
+
+  if (
+    isKnownSafeDomain(registrableDomain) &&
+    !isFreeUgcOrCloudHosting(hostname) &&
+    !hasMobileInstaller
+  ) {
     return {
       indicators: [],
       riskScore: 0,

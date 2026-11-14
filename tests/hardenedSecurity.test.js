@@ -232,6 +232,128 @@ test("Allows legitimate educational Wikipedia phishing article as KNOWN_SAFE", a
   assert.equal(wiki.recommendedAction, "ALLOW");
 });
 
+test("Differentiates clean trusted public DNS IPs, suspicious unknown public IPs, obfuscated public IPs, and blocked private/mapped IPs", async () => {
+  // Clean HTTPS trusted infrastructure IP -> KNOWN_SAFE / ALLOW
+  const safeDnsIp = await verifyUrl("https://1.1.1.1/dns-query", "req-ip-dns");
+  assert.equal(safeDnsIp.finalDecision, "KNOWN_SAFE");
+  assert.equal(safeDnsIp.recommendedAction, "ALLOW");
+
+  // Clean unknown public IP over HTTPS -> SUSPICIOUS / WARN_USER (not blindly blocked)
+  const warnPublicIp = await verifyUrl("https://93.184.216.34/status", "req-ip-warn");
+  assert.equal(warnPublicIp.finalDecision, "SUSPICIOUS");
+  assert.equal(warnPublicIp.recommendedAction, "WARN_USER");
+
+  // Phishing public IP over HTTP with lure/APK -> BLOCK
+  const phishIp = await verifyUrl("http://45.133.1.2/verify-account/update.apk", "req-ip-phish");
+  assert.equal(phishIp.finalDecision, "BLOCK");
+  assert.equal(phishIp.recommendedAction, "DO_NOT_OPEN");
+
+  // Obfuscated decimal public IP -> BLOCK (deliberate evasion)
+  const obfPublicIp = analyzeUrl("http://134744072/");
+  assert.equal(obfPublicIp.decision, "BLOCK");
+  assert.equal(obfPublicIp.reasonCodes[0], "OBFUSCATED_IP_EVASION");
+
+  // Private, CGNAT, IPv4-mapped loopback & NAT64 loopback -> BLOCK
+  for (const badIpUrl of [
+    "http://100.64.0.1/portal",
+    "http://[::ffff:127.0.0.1]/admin",
+    "http://[64:ff9b::7f00:1]/login"
+  ]) {
+    const res = analyzeUrl(badIpUrl);
+    assert.equal(res.decision, "BLOCK");
+    assert.equal(res.reasonCodes[0], "NON_PUBLIC_IP_ADDRESS");
+  }
+});
+
+test("Differentiates clean HTTPS open-source APKs (SUSPICIOUS/WARN_USER) from malicious or query-smuggled APKs (BLOCK)", async () => {
+  const cleanGithubApk = await verifyUrl(
+    "https://github.com/myorg/open-app/releases/download/v1.0/open-app.apk",
+    "req-apk-clean"
+  );
+  assert.equal(cleanGithubApk.finalDecision, "SUSPICIOUS");
+  assert.equal(cleanGithubApk.recommendedAction, "WARN_USER");
+
+  const scamGithubApk = await verifyUrl(
+    "https://github.com/evil/sbi-kyc/releases/download/v1/SBI_KYC_Update.apk",
+    "req-apk-scam"
+  );
+  assert.equal(scamGithubApk.finalDecision, "BLOCK");
+
+  const httpApk = await verifyUrl("http://mirror.example.org/app-release.apk", "req-apk-http");
+  assert.equal(httpApk.finalDecision, "BLOCK");
+
+  const querySmuggledMasq = analyzeUrl("https://example.org/download?file=statement.pdf.apk");
+  assert.equal(querySmuggledMasq.decision, "BLOCK");
+  assert.equal(querySmuggledMasq.reasonCodes[0], "DOUBLE_EXTENSION_MASQUERADE");
+});
+
+test("Blocks custom-parameter redirects, backslash protocol-relative redirects, and multi-hop scam redirects", () => {
+  const customParamPrivateIp = analyzeUrl("https://example.org/view?r=http%3A%2F%2F192.168.1.1%2Fadmin");
+  assert.equal(customParamPrivateIp.decision, "BLOCK");
+
+  const customParamJs = analyzeUrl("https://example.org/view?foo=javascript%3Aalert(1)");
+  assert.equal(customParamJs.decision, "BLOCK");
+
+  const backslashRedirect = analyzeUrl("https://example.org/go?next=%5C%5Cevil.com%2Flogin");
+  assert.equal(backslashRedirect.decision, "BLOCK");
+
+  const multiHopPhish = analyzeUrl(
+    "https://example.org/go?next=https%3A%2F%2Fsbi-kyc-update.xyz%2Famount-credited"
+  );
+  assert.equal(multiHopPhish.decision, "BLOCK");
+});
+
+test("Unverified clean HTTPS site results in HOLD when reputation is unavailable and gates authorize-redirect", async () => {
+  const held = await verifyUrl("https://small-local-shop-example.org/catalog", "req-hold-1");
+  assert.equal(held.finalDecision, "HOLD");
+  assert.equal(held.recommendedAction, "HOLD");
+  assert.ok(held.verificationToken);
+
+  const unconfirmed = verifyRedirectToken({
+    url: "https://small-local-shop-example.org/catalog",
+    token: held.verificationToken,
+    userConfirmedWarning: false
+  });
+  assert.equal(unconfirmed.authorized, false);
+  assert.equal(unconfirmed.reasonCode, "HOLD_REPUTATION_UNAVAILABLE_CONFIRMATION_REQUIRED");
+
+  const confirmed = verifyRedirectToken({
+    url: "https://small-local-shop-example.org/catalog",
+    token: held.verificationToken,
+    userConfirmedWarning: true
+  });
+  assert.equal(confirmed.authorized, true);
+});
+
+test("Blocks Android content://, payment deep-links, and tab-obfuscated javascript schemes at HTTP boundary", async () => {
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    for (const badUri of [
+      "content://sms/inbox",
+      "paytmmp://pay?pa=fraud@paytm",
+      "java\tscript:alert(1)"
+    ]) {
+      const res = await fetch(`${baseUrl}/api/v1/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Request-Source": "a1b2c3d4e5f60001"
+        },
+        body: JSON.stringify({ url: badUri })
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error.code, "FORBIDDEN_URL_CONTENT");
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 // --------------------------------------------------
 // 2. OFFICIAL BANKING & ZERO-EGRESS PRIVACY GUARANTEES
 // --------------------------------------------------

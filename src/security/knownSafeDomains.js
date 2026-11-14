@@ -96,11 +96,66 @@ const KNOWN_SAFE_REGISTRABLE_DOMAINS = new Set([
   "indiapost.gov.in",
   "irctc.co.in",
 
-  // Utilities
+  // Global & Indian Tech, Developer, Reference & Utilities
+  "github.com",
+  "gitlab.com",
+  "stackoverflow.com",
+  "mozilla.org",
+  "w3.org",
+  "cloudflare.com",
+  "zoom.us",
+  "linkedin.com",
+  "adobe.com",
+  "python.org",
+  "nodejs.org",
+  "npmjs.com",
+  "f-droid.org",
   "wikipedia.org",
   "wikimedia.org",
   "openai.com",
-  "netflix.com"
+  "netflix.com",
+
+  // Indian E-Commerce, Fintech & Trusted Services
+  "myntra.com",
+  "zomato.com",
+  "swiggy.com",
+  "cred.club",
+  "zerodha.com",
+  "groww.in",
+  "rbi.org.in",
+  "sebi.gov.in",
+  "nseindia.com",
+  "bseindia.com",
+
+  // Authoritative News & Global Govt
+  "bbc.com",
+  "bbc.co.uk",
+  "reuters.com",
+  "gov.uk",
+  "usa.gov",
+  "irs.gov",
+  "who.int"
+]);
+
+// Well-known, authoritative public infrastructure/DNS IPs (HTTPS clean requests only).
+const KNOWN_SAFE_PUBLIC_IPS = new Set([
+  "1.1.1.1",
+  "1.0.0.1",
+  "8.8.8.8",
+  "8.8.4.4",
+  "9.9.9.9",
+  "149.112.112.112",
+  "2606:4700:4700::1111",
+  "2606:4700:4700::1001",
+  "2001:4860:4860::8888",
+  "2001:4860:4860::8844"
+]);
+
+// Authoritative software-release hosts where HTTPS .apk downloads should warn rather than auto-block.
+const TRUSTED_SOFTWARE_RELEASE_DOMAINS = new Set([
+  "f-droid.org",
+  "github.com",
+  "gitlab.com"
 ]);
 
 /**
@@ -119,4 +174,21 @@ function isKnownSafeDomain(registrableDomain) {
   );
 }
 
-module.exports = { isKnownSafeDomain, KNOWN_SAFE_REGISTRABLE_DOMAINS };
+function isKnownSafePublicIp(ip) {
+  if (!ip || typeof ip !== "string") return false;
+  return KNOWN_SAFE_PUBLIC_IPS.has(ip.toLowerCase().trim().replace(/^\[|\]$/g, ""));
+}
+
+function isTrustedSoftwareReleaseDomain(registrableDomain) {
+  if (!registrableDomain || typeof registrableDomain !== "string") return false;
+  return TRUSTED_SOFTWARE_RELEASE_DOMAINS.has(registrableDomain.toLowerCase().trim());
+}
+
+module.exports = {
+  isKnownSafeDomain,
+  isKnownSafePublicIp,
+  isTrustedSoftwareReleaseDomain,
+  KNOWN_SAFE_REGISTRABLE_DOMAINS,
+  KNOWN_SAFE_PUBLIC_IPS,
+  TRUSTED_SOFTWARE_RELEASE_DOMAINS
+};

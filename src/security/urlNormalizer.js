@@ -16,7 +16,7 @@ const ENCODED_SPOOF_SEQUENCES =
 const MALFORMED_PERCENT_ENCODING = /%(?![0-9a-fA-F]{2})/;
 
 const DANGEROUS_EXPLICIT_SCHEME =
-  /^(?:javascript|data|vbscript|file|intent|upi|tel|sms|smsto|mmsto|market|blob|filesystem|about|view-source|chrome|edge|ftp|ws|wss):/i;
+  /^(?:javascript|data|vbscript|file|content|android-app|intent|upi|paytmmp|phonepe|tez|gpay|bhim|whatsapp|tg|tel|sms|smsto|mmsto|mailto|callto|facetime|geo|market|blob|filesystem|about|view-source|smb|sftp|chrome|edge|ftp|ws|wss):/i;
 
 function reject(reasonCode) {
   return {
@@ -129,8 +129,8 @@ function normalizeUrl(input) {
     return reject("INVALID_HOSTNAME");
   }
 
-  // Reject userinfo/authority confusion immediately (even percent-encoded @ in userinfo).
-  if (rawAuthority.includes("@")) {
+  // Reject userinfo/authority confusion immediately (including percent-encoded @ in userinfo).
+  if (rawAuthority.includes("@") || /%40/i.test(rawAuthority)) {
     return reject("URL_CONTAINS_CREDENTIALS");
   }
 

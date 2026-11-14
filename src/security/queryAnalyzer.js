@@ -1,15 +1,18 @@
 "use strict";
 
 const { analyzeDomain } = require("./domainAnalyzer");
-const { analyzePath } = require("./pathAnalyzer");
+const { analyzePath, hasDoubleExtensionMasquerade } = require("./pathAnalyzer");
+const { analyzeScamLures } = require("./scamLureAnalyzer");
+const { evaluateLexicalAndStructuralRisk } = require("./lexicalRiskEngine");
 const { isBlockedHost } = require("./localThreatList");
 
 const REDIRECT_PARAMETERS = new Set([
-  "url", "uri", "u", "redirect", "redirecturl", "redirecturi",
-  "redirectto", "return", "returnto", "returnurl", "next", "nexturl",
-  "continue", "dest", "destination", "target", "goto", "callback",
-  "forward", "postlogoutredirecturi", "logouturi",
-  "canceluri", "continueurl", "link", "href"
+  "url", "uri", "u", "r", "redirect", "redirecturl", "redirecturi",
+  "redirectto", "redir", "return", "returnto", "returnurl", "ret", "returl",
+  "next", "nexturl", "continue", "continueurl", "dest", "desturl", "destination",
+  "target", "targeturl", "goto", "go", "jump", "callback", "out", "to",
+  "forward", "fallback", "successurl", "failurl",
+  "postlogoutredirecturi", "logouturi", "canceluri", "link", "href"
 ]);
 
 const SENSITIVE_PARAMETERS = new Set([
@@ -30,7 +33,7 @@ const TRACKING_PARAMETERS = new Set([
 ]);
 
 const DANGEROUS_SCHEME =
-  /^(?:javascript|data|vbscript|file|intent|upi|tel|sms|smsto|mmsto|market|blob|filesystem|about|view-source):/i;
+  /^(?:javascript|data|vbscript|file|content|android-app|intent|upi|paytmmp|phonepe|tez|gpay|bhim|whatsapp|tg|tel|sms|smsto|mmsto|mailto|callto|facetime|geo|market|blob|filesystem|about|view-source|smb|sftp):/i;
 
 function normalizeKey(key) {
   return String(key || "")
@@ -133,11 +136,18 @@ function parseNestedHttpUrl(value) {
 
 function inspectRedirectCandidate(candidate, state, depth = 0) {
   const value = String(candidate || "").trim();
-  const schemeProbe = value.replace(/[\u0000-\u0020\u007f]/g, "");
+  const schemeProbe = value.replace(/[\u0000-\u0020\u200B-\u200F\uFEFF\u007f]/g, "");
 
   if (DANGEROUS_SCHEME.test(schemeProbe)) {
     state.indicators.push("DANGEROUS_REDIRECT_SCHEME");
     state.hardBlockReason = "DANGEROUS_REDIRECT_SCHEME";
+    return;
+  }
+
+  // Catch backslash protocol-relative smuggling (e.g. \\evil.com) or scheme without //
+  if (/^\\\\[a-z0-9]/i.test(value) || /^https?:[^/]/i.test(value)) {
+    state.indicators.push("MALFORMED_PROTOCOL_RELATIVE_REDIRECT");
+    state.hardBlockReason = "MALFORMED_PROTOCOL_RELATIVE_REDIRECT";
     return;
   }
 
@@ -195,6 +205,46 @@ function inspectRedirectCandidate(candidate, state, depth = 0) {
   if (nestedPathAnalysis.indicators.includes("MOBILE_SIDELOAD_INSTALLER_PATH")) {
     state.indicators.push("NESTED_REDIRECT_TO_MOBILE_INSTALLER");
     state.hardBlockReason = "NESTED_REDIRECT_TO_MOBILE_INSTALLER";
+    return;
+  }
+
+  // Run full scam-lure and lexical phishing-kit checks on nested redirect hop
+  const nestedIndicators = [
+    ...new Set([
+      ...nestedDomainAnalysis.indicators,
+      ...nestedPathAnalysis.indicators
+    ])
+  ];
+  const nestedRegDomain = nestedDomainAnalysis.destination?.registrableDomain || null;
+
+  const nestedScam = analyzeScamLures({
+    hostname: nested.hostname,
+    registrableDomain: nestedRegDomain,
+    pathSegments: nestedPathAnalysis.segments,
+    parsedUrl: nested.parsedUrl,
+    existingIndicators: nestedIndicators
+  });
+
+  if (nestedScam.hardBlock) {
+    state.indicators.push("NESTED_REDIRECT_SCAM_OR_PHISHING");
+    state.blockedNestedDestinationCount++;
+    state.hardBlockReason = nestedScam.hardBlockReason;
+    return;
+  }
+
+  const nestedLexical = evaluateLexicalAndStructuralRisk({
+    hostname: nested.hostname,
+    registrableDomain: nestedRegDomain,
+    parsedUrl: nested.parsedUrl,
+    rawPath: nested.parsedUrl.pathname || "/",
+    pathSegments: nestedPathAnalysis.segments,
+    existingIndicators: [...nestedIndicators, ...nestedScam.indicators]
+  });
+
+  if (nestedLexical.hardBlock) {
+    state.indicators.push("NESTED_REDIRECT_PHISHING_KIT");
+    state.blockedNestedDestinationCount++;
+    state.hardBlockReason = nestedLexical.hardBlockReason;
     return;
   }
 
@@ -303,8 +353,14 @@ function analyzeQuery(parsedUrl) {
       inspectRedirectCandidate(decoded.value, state, 0);
     } else {
       const trimmedVal = decoded.value.trim();
-      if (DANGEROUS_SCHEME.test(trimmedVal)) {
-        state.indicators.push("DANGEROUS_SCHEME_TEXT_IN_QUERY_VALUE");
+      const schemeProbe = trimmedVal.replace(/[\u0000-\u0020\u200B-\u200F\uFEFF\u007f]/g, "");
+
+      if (DANGEROUS_SCHEME.test(schemeProbe)) {
+        state.indicators.push("DANGEROUS_REDIRECT_SCHEME");
+        state.hardBlockReason = "DANGEROUS_REDIRECT_SCHEME";
+      } else if (/^(?:https?:\/\/|\/\/|\\\\[a-z0-9])/i.test(trimmedVal)) {
+        // Inspect URLs hidden inside non-standard parameter names (?foo=http://192.168.1.1)
+        inspectRedirectCandidate(trimmedVal, state, 1);
       } else {
         const smuggled = tryDecodeSmuggledUrl(trimmedVal);
         if (smuggled) {
@@ -313,6 +369,13 @@ function analyzeQuery(parsedUrl) {
           );
           state.riskScore += 2;
           inspectRedirectCandidate(smuggled.decoded, state, 1);
+        } else if (hasDoubleExtensionMasquerade(trimmedVal)) {
+          state.indicators.push("DOUBLE_EXTENSION_MASQUERADE");
+          state.hardBlockReason = "DOUBLE_EXTENSION_MASQUERADE";
+        } else if (/\.(?:apk|aab|xapk|apks|ipa)(?:$|[?#])/i.test(trimmedVal)) {
+          state.indicators.push("MOBILE_SIDELOAD_INSTALLER_PATH");
+          state.indicators.push("QUERY_MOBILE_INSTALLER_PAYLOAD");
+          state.riskScore += 5;
         }
       }
     }

@@ -22,7 +22,32 @@ function sanitizeIndicators(indicators) {
     .filter(Boolean);
 }
 
+function redactSensitiveSubdomains(hostname, registrableDomain) {
+  const host = sanitizeString(hostname, 253);
+  if (!host) return null;
+  if (!registrableDomain || host === registrableDomain) return host;
+
+  const suffix = `.${registrableDomain}`;
+  if (!host.endsWith(suffix)) return host;
+
+  const sub = host.slice(0, host.length - suffix.length);
+  const maskedSub = sub
+    .split(".")
+    .map((label) =>
+      label.length >= 24 || /^[a-f0-9-]{16,}$/i.test(label)
+        ? "[redacted]"
+        : label
+    )
+    .join(".");
+
+  return `${maskedSub}${suffix}`;
+}
+
 function writeAuditEvent(opts) {
+  const regDomain = opts.destination
+    ? sanitizeString(opts.destination.registrableDomain, 253)
+    : null;
+
   const event = {
     t: new Date().toISOString(),
     reqId: sanitizeString(opts.requestId, 36),
@@ -38,8 +63,8 @@ function writeAuditEvent(opts) {
     indicators: sanitizeIndicators(opts.indicators),
     dest: opts.destination
       ? {
-          hostname: sanitizeString(opts.destination.hostname, 253),
-          registrableDomain: sanitizeString(opts.destination.registrableDomain, 253),
+          hostname: redactSensitiveSubdomains(opts.destination.hostname, regDomain),
+          registrableDomain: regDomain,
           protocol: sanitizeString(opts.destination.protocol, 10)
         }
       : null,

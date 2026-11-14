@@ -9,10 +9,10 @@
 
 const MAX_URL_BYTES = 4096;
 
-const FORBIDDEN_URL_PATTERNS = [
-  // Dangerous web & mobile deep-link schemes (even with zero-width / whitespace padding)
-  /^[\s\u200B-\u200D\uFEFF]*(?:javascript|data|vbscript|file|intent|upi|tel|sms|smsto|mmsto|market|blob|filesystem|about|view-source):/i,
+const DANGEROUS_SCHEME_PATTERN =
+  /^(?:javascript|data|vbscript|file|content|android-app|intent|upi|paytmmp|phonepe|tez|gpay|bhim|whatsapp|tg|tel|sms|smsto|mmsto|mailto|callto|facetime|geo|market|blob|filesystem|about|view-source|smb|sftp|ftp|chrome|edge):/i;
 
+const FORBIDDEN_URL_PATTERNS = [
   // Null bytes (raw or percent-encoded)
   /\x00|%00/i,
 
@@ -42,6 +42,19 @@ function validateUrlString(req, res, url) {
       error: {
         code: "URL_LENGTH_OUT_OF_RANGE",
         message: `"url" must be between 1 and ${MAX_URL_BYTES} bytes.`
+      }
+    });
+    return false;
+  }
+
+  // Strip ASCII whitespace/control/zero-width characters when probing scheme (blocks java\tscript:, upi\u200B:)
+  const schemeProbe = url.replace(/[\u0000-\u0020\u200B-\u200F\uFEFF]/g, "");
+  if (DANGEROUS_SCHEME_PATTERN.test(schemeProbe)) {
+    res.status(400).json({
+      requestId: req.requestId,
+      error: {
+        code: "FORBIDDEN_URL_CONTENT",
+        message: "The submitted value contains a blocked or unsafe URI scheme."
       }
     });
     return false;

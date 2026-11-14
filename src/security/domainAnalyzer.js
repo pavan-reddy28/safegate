@@ -533,9 +533,26 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
       };
     }
 
+    if (options.obfuscatedIpHost) {
+      return {
+        blocked: true,
+        reasonCode: "OBFUSCATED_IP_EVASION",
+        indicators: [...indicators, "IP_LITERAL_HOST", "OBFUSCATED_IP_HOST"],
+        riskScore: 10
+      };
+    }
+
+    const { isKnownSafePublicIp } = require("./knownSafeDomains");
+    const normalizedIp = address.toNormalizedString();
+
     indicators.push("IP_LITERAL_HOST");
-    indicators.push("PUBLIC_IP_LITERAL_HOST");
-    riskScore += 4;
+
+    if (isKnownSafePublicIp(normalizedIp) && parsedUrl.protocol === "https:") {
+      indicators.push("TRUSTED_PUBLIC_INFRASTRUCTURE_IP");
+    } else {
+      indicators.push("PUBLIC_IP_LITERAL_HOST");
+      riskScore += 4;
+    }
   } else {
     if (!hasValidDnsLabels(host)) {
       return {

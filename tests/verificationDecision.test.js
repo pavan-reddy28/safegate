@@ -43,20 +43,32 @@ test("Clean known-safe HTTPS domain produces KNOWN_SAFE / ALLOW", () => {
   assert.equal(result.recommendedAction, "ALLOW");
 });
 
-test("Known-safe domain over unencrypted HTTP is NOT upgraded to KNOWN_SAFE", () => {
+test("Known-safe domain over unencrypted HTTP is NOT upgraded to KNOWN_SAFE and results in HOLD", () => {
   const result = calculateFinalDecision(
     local("REPUTATION_CHECK_REQUIRED", { riskScore: 1, destination: { protocol: "http:" } }),
     "sbi.co.in"
   );
 
-  assert.equal(result.finalDecision, "NO_KNOWN_THREAT");
-  assert.equal(result.recommendedAction, "ALLOW_WITH_CAUTION");
+  assert.equal(result.finalDecision, "HOLD");
+  assert.equal(result.recommendedAction, "HOLD");
 });
 
-test("Clean unknown HTTPS domain produces NO_KNOWN_THREAT / ALLOW_WITH_CAUTION", () => {
+test("Clean unknown HTTPS domain with unavailable reputation check results in HOLD", () => {
   const result = calculateFinalDecision(
     local("REPUTATION_CHECK_REQUIRED", { riskScore: 0, destination: { protocol: "https:" } }),
     "example.org"
+  );
+
+  assert.equal(result.finalDecision, "HOLD");
+  assert.equal(result.recommendedAction, "HOLD");
+  assert.ok(result.finalReasonCodes.includes("REPUTATION_CHECK_UNAVAILABLE_ZERO_EGRESS"));
+});
+
+test("Clean unknown HTTPS domain resolves to NO_KNOWN_THREAT when reputation check explicitly succeeds", () => {
+  const result = calculateFinalDecision(
+    local("REPUTATION_CHECK_REQUIRED", { riskScore: 0, destination: { protocol: "https:" } }),
+    "example.org",
+    { reputationCheckStatus: "NO_KNOWN_THREAT" }
   );
 
   assert.equal(result.finalDecision, "NO_KNOWN_THREAT");

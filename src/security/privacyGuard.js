@@ -49,7 +49,6 @@ function extractPrivatePartsForAssertion(rawUrl) {
   try {
     parsed = new URL(rawUrl.trim());
   } catch {
-    // If unparseable, the entire raw input (if > 12 chars) must never appear.
     if (rawUrl.trim().length > 12) {
       privateTokens.push(rawUrl.trim());
     }
@@ -58,6 +57,15 @@ function extractPrivatePartsForAssertion(rawUrl) {
 
   if (parsed.pathname && parsed.pathname.length > 4) {
     privateTokens.push(parsed.pathname);
+    try {
+      const decodedPath = decodeURIComponent(parsed.pathname);
+      if (decodedPath.length > 4) privateTokens.push(decodedPath);
+    } catch {
+      // ignore malformed
+    }
+    for (const seg of parsed.pathname.split("/").filter(Boolean)) {
+      if (seg.length >= 12) privateTokens.push(seg);
+    }
   }
 
   if (parsed.search && parsed.search.length > 1) {
@@ -65,6 +73,12 @@ function extractPrivatePartsForAssertion(rawUrl) {
     for (const [, value] of parsed.searchParams.entries()) {
       if (value && value.length >= 6) {
         privateTokens.push(value);
+        try {
+          const dec = decodeURIComponent(value);
+          if (dec.length >= 6) privateTokens.push(dec);
+        } catch {
+          // ignore
+        }
       }
     }
   }

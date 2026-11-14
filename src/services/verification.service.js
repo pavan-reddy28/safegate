@@ -8,13 +8,13 @@
  */
 
 const { analyzeUrl } = require("../security/urlAnalyzer");
-const { isKnownSafeDomain } = require("../security/knownSafeDomains");
+const { isKnownSafeDomain, isKnownSafePublicIp } = require("../security/knownSafeDomains");
 const { isFreeUgcOrCloudHosting } = require("../security/localThreatList");
 const { issueRedirectToken, verifyRedirectToken } = require("../security/redirectToken");
 const { verifyNoPrivateUrlLeak } = require("../security/privacyGuard");
 const { writeAuditEvent } = require("../utils/auditLog");
 
-function calculateFinalDecision(localAnalysis, registrableDomain) {
+function calculateFinalDecision(localAnalysis, registrableDomain, options = {}) {
   if (localAnalysis.decision === "BLOCK") {
     return {
       finalDecision: "BLOCK",
@@ -52,12 +52,40 @@ function calculateFinalDecision(localAnalysis, registrableDomain) {
     };
   }
 
+  if (
+    isKnownSafePublicIp(hostname) &&
+    riskScore === 0 &&
+    protocol === "https:"
+  ) {
+    return {
+      finalDecision: "KNOWN_SAFE",
+      recommendedAction: "ALLOW",
+      finalReasonCodes: [
+        "ALL_LOCAL_SECURITY_LAYERS_PASSED",
+        "HTTPS_TRANSPORT_VERIFIED",
+        "TRUSTED_PUBLIC_INFRASTRUCTURE_IP"
+      ]
+    };
+  }
+
+  const reputationStatus = options.reputationCheckStatus || "UNAVAILABLE";
+  if (reputationStatus === "NO_KNOWN_THREAT") {
+    return {
+      finalDecision: "NO_KNOWN_THREAT",
+      recommendedAction: "ALLOW_WITH_CAUTION",
+      finalReasonCodes: [
+        "ALL_LOCAL_SECURITY_LAYERS_PASSED",
+        ...(protocol === "http:" ? ["UNENCRYPTED_HTTP_CAUTION"] : ["HTTPS_TRANSPORT_VERIFIED"])
+      ]
+    };
+  }
+
   return {
-    finalDecision: "NO_KNOWN_THREAT",
-    recommendedAction: "ALLOW_WITH_CAUTION",
+    finalDecision: "HOLD",
+    recommendedAction: "HOLD",
     finalReasonCodes: [
-      "ALL_LOCAL_SECURITY_LAYERS_PASSED",
-      ...(protocol === "http:" ? ["UNENCRYPTED_HTTP_CAUTION"] : ["HTTPS_TRANSPORT_VERIFIED"])
+      "REPUTATION_CHECK_UNAVAILABLE_ZERO_EGRESS",
+      ...(protocol === "http:" ? ["UNENCRYPTED_HTTP_CAUTION"] : ["LOCAL_STRUCTURAL_CHECKS_PASSED"])
     ]
   };
 }
@@ -71,9 +99,9 @@ function buildSecurityChecksSummary(localAnalysis) {
     schemeAndEncodingCheck: isBlocked && ["UNSUPPORTED_OR_DANGEROUS_SCHEME", "CONTROL_CHARACTERS_FOUND", "INVISIBLE_OR_BIDI_CHARACTERS_FOUND", "ENCODED_SPOOF_OR_NULL_SEQUENCE", "ENCODED_CONTROL_CHARACTER", "INJECTED_SCRIPT_IN_PATH"].includes(localAnalysis.reasonCodes?.[0])
       ? "FAILED"
       : "PASSED",
-    networkAndIpIsolationCheck: isBlocked && ["NON_PUBLIC_IP_ADDRESS", "NON_PUBLIC_HOSTNAME", "DANGEROUS_NON_WEB_PORT", "LOCAL_THREAT_LIST_MATCH"].includes(localAnalysis.reasonCodes?.[0])
+    networkAndIpIsolationCheck: isBlocked && ["NON_PUBLIC_IP_ADDRESS", "OBFUSCATED_IP_EVASION", "NON_PUBLIC_HOSTNAME", "DANGEROUS_NON_WEB_PORT", "LOCAL_THREAT_LIST_MATCH"].includes(localAnalysis.reasonCodes?.[0])
       ? "FAILED"
-      : indicators.includes("OBFUSCATED_IP_HOST") || indicators.includes("IP_LITERAL_HOST")
+      : indicators.includes("OBFUSCATED_IP_HOST") || indicators.includes("PUBLIC_IP_LITERAL_HOST")
         ? "FLAGGED"
         : "PASSED",
     homographAndBrandSpoofCheck: indicators.some((i) =>
@@ -106,7 +134,7 @@ function buildSecurityChecksSummary(localAnalysis) {
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED",
     redirectAndSmugglingCheck: indicators.some((i) =>
-      ["DANGEROUS_REDIRECT_SCHEME", "NESTED_REDIRECT_CONTAINS_CREDENTIALS", "NESTED_REDIRECT_DESTINATION_BLOCKED", "NESTED_REDIRECT_TO_MOBILE_INSTALLER", "BASE64_SMUGGLED_REDIRECT", "HEX_SMUGGLED_REDIRECT", "SUSPICIOUS_NESTED_REDIRECT_DOMAIN", "FRAGMENT_VICTIM_EMAIL_PREFILL_KIT"].includes(i)
+      ["DANGEROUS_REDIRECT_SCHEME", "MALFORMED_PROTOCOL_RELATIVE_REDIRECT", "NESTED_REDIRECT_CONTAINS_CREDENTIALS", "NESTED_REDIRECT_DESTINATION_BLOCKED", "NESTED_REDIRECT_TO_MOBILE_INSTALLER", "BASE64_SMUGGLED_REDIRECT", "HEX_SMUGGLED_REDIRECT", "SUSPICIOUS_NESTED_REDIRECT_DOMAIN", "FRAGMENT_VICTIM_EMAIL_PREFILL_KIT"].includes(i)
     )
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED",
@@ -149,7 +177,7 @@ function buildRiskSummary({
       score: riskScore,
       headline: `Suspicious link detected (${host})`,
       parentAdvisory:
-        "Be very careful. This link has suspicious traits (such as a lookalike domain, hidden shortened link, file download, or unverified hosting). Open your official bank or service app directly instead.",
+        "Be very careful. This link has suspicious traits (such as a lookalike domain, hidden shortened link, sideload download, raw IP host, or unverified hosting). Open your official bank or service app directly instead.",
       reasons: finalReasonCodes,
       indicatorsCount: indicators.length
     };
@@ -159,9 +187,21 @@ function buildRiskSummary({
     return {
       level: "SAFE",
       score: riskScore ?? 0,
-      headline: `Verified official website (${host})`,
+      headline: `Verified official destination (${host})`,
       parentAdvisory:
-        "This link points to an authoritative official domain over HTTPS and passed all on-device security checks with zero data leaving your phone.",
+        "This link points to an authoritative official domain or infrastructure IP over HTTPS and passed all on-device security checks with zero data leaving your phone.",
+      reasons: finalReasonCodes,
+      indicatorsCount: indicators.length
+    };
+  }
+
+  if (finalDecision === "HOLD") {
+    return {
+      level: "MEDIUM",
+      score: riskScore ?? 0,
+      headline: `Held for confirmation (${host})`,
+      parentAdvisory:
+        "This link passed all 21 on-device checks, but its domain is unverified and remote reputation lookup is disabled to guarantee zero data leakage. Only open it if you personally trust the sender.",
       reasons: finalReasonCodes,
       indicatorsCount: indicators.length
     };
