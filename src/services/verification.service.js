@@ -82,7 +82,8 @@ function buildSecurityChecksSummary(localAnalysis) {
       i.includes("IDN") ||
       i.includes("PUNYCODE") ||
       i.includes("DECEPTIVE_") ||
-      i.includes("HYPHEN_LURE")
+      i.includes("HYPHEN_LURE") ||
+      i === "UNIVERSAL_SUBDOMAIN_TLD_MASQUERADING"
     )
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED",
@@ -95,18 +96,26 @@ function buildSecurityChecksSummary(localAnalysis) {
         "PATH_TRAVERSAL_PATTERN",
         "INJECTED_SCRIPT_IN_PATH",
         "EXPLICIT_THREAT_KEYWORD_IN_PATH",
+        "LEXICAL_EXPLICIT_PHISHING_OR_MALWARE_STEM",
+        "COMPROMISED_ASSET_DIR_PHISHING_KIT",
+        "OBFUSCATED_SHORT_PATH_STATIC_KIT",
+        "HEAVY_PERCENT_ENCODING_OBFUSCATION",
         "EMBEDDED_URL_IN_PATH"
       ].includes(i)
     )
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED",
     redirectAndSmugglingCheck: indicators.some((i) =>
-      ["DANGEROUS_REDIRECT_SCHEME", "NESTED_REDIRECT_CONTAINS_CREDENTIALS", "NESTED_REDIRECT_DESTINATION_BLOCKED", "NESTED_REDIRECT_TO_MOBILE_INSTALLER", "BASE64_SMUGGLED_REDIRECT", "HEX_SMUGGLED_REDIRECT", "SUSPICIOUS_NESTED_REDIRECT_DOMAIN"].includes(i)
+      ["DANGEROUS_REDIRECT_SCHEME", "NESTED_REDIRECT_CONTAINS_CREDENTIALS", "NESTED_REDIRECT_DESTINATION_BLOCKED", "NESTED_REDIRECT_TO_MOBILE_INSTALLER", "BASE64_SMUGGLED_REDIRECT", "HEX_SMUGGLED_REDIRECT", "SUSPICIOUS_NESTED_REDIRECT_DOMAIN", "FRAGMENT_VICTIM_EMAIL_PREFILL_KIT"].includes(i)
     )
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED",
     smsScamLureCheck: indicators.some((i) =>
-      ["SMS_FINANCIAL_SCAM_LURE", "URGENCY_OR_KYC_SCAM_LURE", "SENSITIVE_BANKING_CREDENTIAL_HARVEST_PATTERN", "BRAND_IMPERSONATION_WITH_SCAM_LURE_IN_PATH"].includes(i)
+      i.includes("SCAM_LURE") ||
+      i.includes("CREDENTIAL_HARVEST") ||
+      i.includes("INTENT_VECTOR") ||
+      i.startsWith("LURE_INTENT_") ||
+      i === "MULTI_VECTOR_SOCIAL_ENGINEERING_ATTACK"
     )
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED"
@@ -128,7 +137,7 @@ function buildRiskSummary({
       score: riskScore,
       headline: "Dangerous link blocked",
       parentAdvisory:
-        "STOP! Do NOT open this link. SafeGate blocked it on your device because it shows strong signs of a phishing scam, fake bank/KYC lure, malware download, or unsafe redirect.",
+        "STOP! Do NOT open this link. SafeGate blocked it on your device because it shows strong signs of a phishing scam, compromised site kit, malware download, or unsafe redirect.",
       reasons: finalReasonCodes,
       indicatorsCount: indicators.length
     };
@@ -163,7 +172,7 @@ function buildRiskSummary({
     score: riskScore ?? 0,
     headline: `No local threats detected (${host})`,
     parentAdvisory:
-      "All 16 on-device security checks passed with zero external network calls. Still never enter your UPI PIN, OTP, CVV, or bank password unless you are 100% sure you trust this website.",
+      "All 21 on-device security checks passed with zero external network calls. Still never enter your UPI PIN, OTP, CVV, or password unless you are 100% sure you trust this website.",
     reasons: finalReasonCodes,
     indicatorsCount: indicators.length
   };
@@ -176,16 +185,21 @@ const LAYERS_EXECUTED = [
   "NON_PUBLIC_IP_AND_PORT_ISOLATION",
   "UNICODE_HOMOGRAPH_AND_CONFUSABLE_SKELETON",
   "SUBDOMAIN_AND_LEET_BRAND_SPOOF_DETECTION",
-  "DGA_ENTROPY_AND_ABUSED_TLD_INTELLIGENCE",
-  "SHORTENER_AND_TUNNEL_HOST_DETECTION",
+  "UNIVERSAL_SUBDOMAIN_TLD_MASQUERADE_SHIELD",
+  "DGA_ENTROPY_AND_VOWEL_CONSONANT_SCORER",
+  "ABUSED_TLD_SHORTENER_AND_TUNNEL_DETECTION",
   "PATH_SCRIPT_AND_DOUBLE_EXTENSION_SHIELD",
+  "COMPROMISED_CMS_KIT_AND_STAGING_DETECTOR",
   "ANDROID_APK_AND_ARCHIVE_MALWARE_CHECK",
   "BASE64_AND_HEX_SMUGGLED_REDIRECT_DECODER",
   "MULTI_HOP_RECURSIVE_REDIRECT_INSPECTOR",
+  "FRAGMENT_EMAIL_PREFILL_TRAP_DETECTOR",
   "SMS_SCAM_AND_UPI_CREDENTIAL_LURE_ENGINE",
+  "MULTI_VECTOR_LEXICAL_INTENT_CLASSIFIER",
   "KNOWN_SAFE_OFFICIAL_DOMAIN_POLICY",
   "EPHEMERAL_HMAC_REDIRECT_TOKEN",
-  "RUNTIME_ZERO_LEAKAGE_ASSERTION"
+  "RUNTIME_ZERO_LEAKAGE_ASSERTION",
+  "ZERO_URL_RETENTION_AUDIT_LOG"
 ];
 
 async function verifyUrl(url, requestId) {

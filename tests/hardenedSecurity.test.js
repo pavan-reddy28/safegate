@@ -94,10 +94,14 @@ test("Blocks Cyrillic homograph brand impersonation (mixed-script and pure-Cyril
   assert.ok(pure.indicators.includes("CONFUSABLE_HOMOGRAPH_BRAND_IMPERSONATION"));
 });
 
-test("Flags leet-speak / brand-in-unrelated-domain lookalikes", () => {
-  const result = analyzeUrl("https://hdfc-netbanking-verify.com/login");
-  assert.equal(result.decision, "SUSPICIOUS");
-  assert.ok(result.indicators.includes("BRAND_NAME_IN_UNRELATED_DOMAIN"));
+test("Blocks bank+verify+login phishing and flags standalone brand lookalikes as SUSPICIOUS", () => {
+  const bankPhish = analyzeUrl("https://hdfc-netbanking-verify.com/login");
+  assert.equal(bankPhish.decision, "BLOCK");
+  assert.ok(bankPhish.indicators.includes("BRAND_NAME_IN_UNRELATED_DOMAIN"));
+
+  const standaloneLookalike = analyzeUrl("https://paypa1-mirror.com/home");
+  assert.equal(standaloneLookalike.decision, "SUSPICIOUS");
+  assert.ok(standaloneLookalike.indicators.includes("BRAND_NAME_IN_UNRELATED_DOMAIN"));
 });
 
 test("Blocks dangerous UPI / intent deep-link inside redirect parameter", () => {
@@ -163,9 +167,10 @@ test("Blocks DGA high-entropy phishing domain on high-risk TLD", () => {
   assert.ok(result.indicators.includes("HIGH_ENTROPY_DGA_DOMAIN"));
 });
 
-test("Blocks Google Safe Browsing phishing test URL and generic cloud phishing kits", () => {
+test("Auto-detects Google Safe Browsing test URL algorithmically without any hardcoded blocklist entry", () => {
   const gsbTest = analyzeUrl("https://testsafebrowsing.appspot.com/s/phishing.html");
   assert.equal(gsbTest.decision, "BLOCK");
+  assert.notEqual(gsbTest.reasonCodes[0], "LOCAL_THREAT_LIST_MATCH");
 
   const genericAppEnginePhish = analyzeUrl("https://custom-phish-app-42.appspot.com/s/phishing.html");
   assert.equal(genericAppEnginePhish.decision, "BLOCK");
@@ -187,6 +192,38 @@ test("Blocks global parcel/customs, crypto seed/airdrop, tech-support, and accou
 
   const deceptiveHyphenKit = analyzeUrl("https://secure-verify-account-update-portal.xyz/signin");
   assert.equal(deceptiveHyphenKit.decision, "BLOCK");
+});
+
+test("Zero-day brand-agnostic engine blocks compromised CMS kits, subdomain TLD spoofing, fragment email prefills, and short DGAs", () => {
+  // Compromised WordPress/asset folder dropping a static/php phishing kit on an unseen .com domain
+  const wpKit = analyzeUrl("https://local-bakery-shop.com/wp-content/uploads/2026/auth/update.php");
+  assert.equal(wpKit.decision, "BLOCK");
+  assert.equal(wpKit.reasonCodes[0], "COMPROMISED_WEBSITE_PHISHING_KIT");
+
+  // Unknown brand spoofed using embedded TLD in subdomain
+  const subTldSpoof = analyzeUrl("https://myregionalbank.com.security-check-99.net/auth");
+  assert.equal(subTldSpoof.decision, "BLOCK");
+  assert.ok(subTldSpoof.indicators.includes("UNIVERSAL_SUBDOMAIN_TLD_MASQUERADING"));
+
+  // Fragment email prefill phishing kit (#victim@email.com or Base64 email) never leaked
+  const fragEmailKit = analyzeUrl("https://webmail-portal-access.com/auth/confirm.html#mom@gmail.com");
+  assert.equal(fragEmailKit.decision, "BLOCK");
+  assert.equal(JSON.stringify(fragEmailKit).includes("mom@gmail.com"), false);
+
+  const b64Email = Buffer.from("dad@yahoo.com", "utf8").toString("base64");
+  const fragB64Kit = analyzeUrl(`https://doc-view-access.net/invoice/signin.html#${b64Email}`);
+  assert.equal(fragB64Kit.decision, "BLOCK");
+  assert.equal(JSON.stringify(fragB64Kit).includes(b64Email), false);
+
+  // Short random consonant-cluster DGA domain with lure path on unseen .com/.org
+  const shortDga = analyzeUrl("http://xkqpwzrtm.com/verify");
+  assert.equal(shortDga.decision, "BLOCK");
+  assert.ok(shortDga.indicators.includes("ALGORITHMIC_DGA_HOST_ANOMALY"));
+
+  // 3+ distinct social engineering intent vectors on an unknown clean .com
+  const multiVector = analyzeUrl("https://unseen-domain-example.com/portal/confirm-overdue-invoice-shipment");
+  assert.equal(multiVector.decision, "BLOCK");
+  assert.equal(multiVector.reasonCodes[0], "MULTI_VECTOR_PHISHING_DETECTED");
 });
 
 test("Allows legitimate educational Wikipedia phishing article as KNOWN_SAFE", async () => {

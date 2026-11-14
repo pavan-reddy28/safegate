@@ -2,19 +2,10 @@
 
 const { localBlockedDomains } = require("../config/env");
 
-// Built-in on-device threat & phishing/malware test hostnames (combined with env LOCAL_BLOCKED_DOMAINS)
-const BUILTIN_BLOCKED_DOMAINS = new Set([
-  "testsafebrowsing.appspot.com",
-  "malware.testing.google.test",
-  "phishing.testing.google.test",
-  "ianfette.org",
-  "amtso.org"
-]);
-
-const blockedDomains = new Set([
-  ...BUILTIN_BLOCKED_DOMAINS,
-  ...localBlockedDomains.map((domain) => domain.toLowerCase())
-]);
+// Optional user-configured domain blocklist loaded strictly from local .env (no hardcoded URL cheats)
+const blockedDomains = new Set(
+  localBlockedDomains.map((domain) => domain.toLowerCase())
+);
 
 // Known URL shorteners that hide the true destination from the user & local analyzer.
 const URL_SHORTENER_DOMAINS = new Set([
@@ -119,7 +110,6 @@ module.exports = {
   isTunnelOrDynamicDns,
   isFreeUgcOrCloudHosting,
   hasHighRiskTld,
-  BUILTIN_BLOCKED_DOMAINS,
   URL_SHORTENER_DOMAINS,
   TUNNEL_OR_DYNAMIC_DNS_DOMAINS,
   FREE_UGC_OR_CLOUD_HOSTING_DOMAINS,

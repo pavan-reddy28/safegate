@@ -5,12 +5,13 @@ const { analyzeDomain } = require("./domainAnalyzer");
 const { analyzePath } = require("./pathAnalyzer");
 const { analyzeQuery } = require("./queryAnalyzer");
 const { analyzeScamLures } = require("./scamLureAnalyzer");
+const { evaluateLexicalAndStructuralRisk } = require("./lexicalRiskEngine");
 const { buildRedactedDestination } = require("./privacyGuard");
 const { isKnownSafeDomain } = require("./knownSafeDomains");
 const { isFreeUgcOrCloudHosting } = require("./localThreatList");
 
 const SUSPICIOUS_RISK_THRESHOLD = 3;
-const LOCAL_BLOCK_SCORE_THRESHOLD = 8;
+const LOCAL_BLOCK_SCORE_THRESHOLD = 7;
 
 function blocked(reasonCode, indicators = []) {
   return {
@@ -100,19 +101,39 @@ function analyzeUrl(input) {
     existingIndicators: preLureIndicators
   });
 
-  const allIndicators = [
+  const midIndicators = [
     ...new Set([...preLureIndicators, ...scamAnalysis.indicators])
   ];
 
   if (scamAnalysis.hardBlock) {
-    return blocked(scamAnalysis.hardBlockReason, allIndicators);
+    return blocked(scamAnalysis.hardBlockReason, midIndicators);
+  }
+
+  // Layer 6: Brand-agnostic lexical, multi-vector intent, DGA consonant/entropy,
+  // compromised-CMS kit, fragment email-prefill & universal subdomain TLD-masquerade engine
+  const lexicalAnalysis = evaluateLexicalAndStructuralRisk({
+    hostname,
+    registrableDomain,
+    parsedUrl,
+    rawPath,
+    pathSegments: pathAnalysis.segments,
+    existingIndicators: midIndicators
+  });
+
+  const allIndicators = [
+    ...new Set([...midIndicators, ...lexicalAnalysis.indicators])
+  ];
+
+  if (lexicalAnalysis.hardBlock) {
+    return blocked(lexicalAnalysis.hardBlockReason, allIndicators);
   }
 
   const riskScore =
     domainAnalysis.riskScore +
     effectivePathRiskScore +
     queryAnalysis.riskScore +
-    scamAnalysis.riskScore;
+    scamAnalysis.riskScore +
+    lexicalAnalysis.riskScore;
 
   if (riskScore >= LOCAL_BLOCK_SCORE_THRESHOLD) {
     return blocked("HIGH_RISK_SCORE_LOCAL_BLOCK", allIndicators);
