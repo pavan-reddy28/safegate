@@ -77,12 +77,26 @@ function buildSecurityChecksSummary(localAnalysis) {
         ? "FLAGGED"
         : "PASSED",
     homographAndBrandSpoofCheck: indicators.some((i) =>
-      i.includes("BRAND") || i.includes("HOMOGRAPH") || i.includes("IDN") || i.includes("PUNYCODE")
+      i.includes("BRAND") ||
+      i.includes("HOMOGRAPH") ||
+      i.includes("IDN") ||
+      i.includes("PUNYCODE") ||
+      i.includes("DECEPTIVE_") ||
+      i.includes("HYPHEN_LURE")
     )
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED",
     malwareAndPathCheck: indicators.some((i) =>
-      ["MOBILE_SIDELOAD_INSTALLER_PATH", "EXECUTABLE_DOWNLOAD_PATH", "ARCHIVE_DOWNLOAD_PATH", "DOUBLE_EXTENSION_MASQUERADE", "PATH_TRAVERSAL_PATTERN", "INJECTED_SCRIPT_IN_PATH"].includes(i)
+      [
+        "MOBILE_SIDELOAD_INSTALLER_PATH",
+        "EXECUTABLE_DOWNLOAD_PATH",
+        "ARCHIVE_DOWNLOAD_PATH",
+        "DOUBLE_EXTENSION_MASQUERADE",
+        "PATH_TRAVERSAL_PATTERN",
+        "INJECTED_SCRIPT_IN_PATH",
+        "EXPLICIT_THREAT_KEYWORD_IN_PATH",
+        "EMBEDDED_URL_IN_PATH"
+      ].includes(i)
     )
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED",

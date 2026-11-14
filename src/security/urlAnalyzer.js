@@ -6,6 +6,8 @@ const { analyzePath } = require("./pathAnalyzer");
 const { analyzeQuery } = require("./queryAnalyzer");
 const { analyzeScamLures } = require("./scamLureAnalyzer");
 const { buildRedactedDestination } = require("./privacyGuard");
+const { isKnownSafeDomain } = require("./knownSafeDomains");
+const { isFreeUgcOrCloudHosting } = require("./localThreatList");
 
 const SUSPICIOUS_RISK_THRESHOLD = 3;
 const LOCAL_BLOCK_SCORE_THRESHOLD = 8;
@@ -48,6 +50,10 @@ function analyzeUrl(input) {
     return blocked(domainAnalysis.reasonCode, domainAnalysis.indicators);
   }
 
+  const registrableDomain = domainAnalysis.destination?.registrableDomain || null;
+  const isSafeFirstParty =
+    isKnownSafeDomain(registrableDomain) && !isFreeUgcOrCloudHosting(hostname);
+
   // Layer 3: Path, encoding, script injection, double-extension & malware download inspection
   const pathAnalysis = analyzePath(rawPath, parsedUrl.pathname);
 
@@ -58,13 +64,21 @@ function analyzeUrl(input) {
     );
   }
 
+  const effectivePathIndicators = isSafeFirstParty
+    ? pathAnalysis.indicators.filter((i) => i !== "EXPLICIT_THREAT_KEYWORD_IN_PATH")
+    : pathAnalysis.indicators;
+  const effectivePathRiskScore =
+    isSafeFirstParty && pathAnalysis.indicators.includes("EXPLICIT_THREAT_KEYWORD_IN_PATH")
+      ? Math.max(0, pathAnalysis.riskScore - 5)
+      : pathAnalysis.riskScore;
+
   // Layer 4: Query, fragment, Base64/Hex smuggling & multi-hop nested redirect inspection
   const queryAnalysis = analyzeQuery(parsedUrl);
 
   if (queryAnalysis.hardBlockReason) {
     return blocked(queryAnalysis.hardBlockReason, [
       ...domainAnalysis.indicators,
-      ...pathAnalysis.indicators,
+      ...effectivePathIndicators,
       ...queryAnalysis.indicators
     ]);
   }
@@ -72,15 +86,15 @@ function analyzeUrl(input) {
   const preLureIndicators = [
     ...new Set([
       ...domainAnalysis.indicators,
-      ...pathAnalysis.indicators,
+      ...effectivePathIndicators,
       ...queryAnalysis.indicators
     ])
   ];
 
-  // Layer 5: SMS / WhatsApp social-engineering scam lure & compound escalation engine
+  // Layer 5: Global social-engineering scam lure & compound escalation engine
   const scamAnalysis = analyzeScamLures({
     hostname,
-    registrableDomain: domainAnalysis.destination?.registrableDomain || null,
+    registrableDomain,
     pathSegments: pathAnalysis.segments,
     parsedUrl,
     existingIndicators: preLureIndicators
@@ -96,7 +110,7 @@ function analyzeUrl(input) {
 
   const riskScore =
     domainAnalysis.riskScore +
-    pathAnalysis.riskScore +
+    effectivePathRiskScore +
     queryAnalysis.riskScore +
     scamAnalysis.riskScore;
 

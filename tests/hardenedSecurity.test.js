@@ -163,6 +163,38 @@ test("Blocks DGA high-entropy phishing domain on high-risk TLD", () => {
   assert.ok(result.indicators.includes("HIGH_ENTROPY_DGA_DOMAIN"));
 });
 
+test("Blocks Google Safe Browsing phishing test URL and generic cloud phishing kits", () => {
+  const gsbTest = analyzeUrl("https://testsafebrowsing.appspot.com/s/phishing.html");
+  assert.equal(gsbTest.decision, "BLOCK");
+
+  const genericAppEnginePhish = analyzeUrl("https://custom-phish-app-42.appspot.com/s/phishing.html");
+  assert.equal(genericAppEnginePhish.decision, "BLOCK");
+
+  const cloudLoginKit = analyzeUrl("https://client-portal-99.pages.dev/webmail/signin.html");
+  assert.equal(cloudLoginKit.decision, "BLOCK");
+  assert.equal(cloudLoginKit.reasonCodes[0], "ABUSED_HOSTING_PHISHING_PATTERN");
+});
+
+test("Blocks global parcel/customs, crypto seed/airdrop, tech-support, and account-lock scams", () => {
+  const parcel = analyzeUrl("https://fedex-parcel-hold.top/customs-clearance/address-update");
+  assert.equal(parcel.decision, "BLOCK");
+
+  const crypto = analyzeUrl("https://metamask-reward.vip/airdrop/connect-wallet");
+  assert.equal(crypto.decision, "BLOCK");
+
+  const scareware = analyzeUrl("https://security-alert-support.club/virus-detected");
+  assert.equal(scareware.decision, "BLOCK");
+
+  const deceptiveHyphenKit = analyzeUrl("https://secure-verify-account-update-portal.xyz/signin");
+  assert.equal(deceptiveHyphenKit.decision, "BLOCK");
+});
+
+test("Allows legitimate educational Wikipedia phishing article as KNOWN_SAFE", async () => {
+  const wiki = await verifyUrl("https://en.wikipedia.org/wiki/Phishing", "req-wiki-safe");
+  assert.equal(wiki.finalDecision, "KNOWN_SAFE");
+  assert.equal(wiki.recommendedAction, "ALLOW");
+});
+
 // --------------------------------------------------
 // 2. OFFICIAL BANKING & ZERO-EGRESS PRIVACY GUARANTEES
 // --------------------------------------------------

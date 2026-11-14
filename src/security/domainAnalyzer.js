@@ -34,24 +34,99 @@ const DANGEROUS_PORTS = new Set([
 ]);
 
 const BRAND_DOMAINS = {
+  // Global Tech, Cloud, Email & Collaboration
   microsoft: new Set([
     "microsoft.com", "microsoftonline.com", "live.com",
     "outlook.com", "office.com", "office365.com",
-    "sharepoint.com", "onmicrosoft.com"
+    "sharepoint.com", "onmicrosoft.com", "azure.com", "bing.com"
   ]),
   google: new Set([
     "google.com", "google.co.in", "googleapis.com",
     "googleusercontent.com", "googlemail.com", "gmail.com",
-    "g.co", "youtube.com"
+    "g.co", "youtube.com", "accounts.google.com"
   ]),
-  apple: new Set(["apple.com", "icloud.com"]),
-  paypal: new Set(["paypal.com"]),
-  amazon: new Set(["amazon.com", "amazon.in", "amazon.co.uk", "amazonaws.com"]),
-  flipkart: new Set(["flipkart.com"]),
+  apple: new Set(["apple.com", "icloud.com", "me.com"]),
+  adobe: new Set(["adobe.com", "acrobat.com"]),
+  docusign: new Set(["docusign.com", "docusign.net"]),
+  dropbox: new Set(["dropbox.com"]),
+  zoom: new Set(["zoom.us", "zoom.com"]),
+  slack: new Set(["slack.com"]),
+  github: new Set(["github.com"]),
+  linkedin: new Set(["linkedin.com"]),
+  cloudflare: new Set(["cloudflare.com"]),
+  godaddy: new Set(["godaddy.com"]),
+  namecheap: new Set(["namecheap.com"]),
+
+  // Social, Messaging, Streaming & Gaming
   whatsapp: new Set(["whatsapp.com", "whatsapp.net"]),
   facebook: new Set(["facebook.com", "fb.com", "meta.com", "messenger.com"]),
   instagram: new Set(["instagram.com"]),
+  telegram: new Set(["telegram.org", "t.me"]),
+  discord: new Set(["discord.com", "discord.gg"]),
+  snapchat: new Set(["snapchat.com"]),
+  tiktok: new Set(["tiktok.com"]),
+  twitter: new Set(["twitter.com", "x.com"]),
   netflix: new Set(["netflix.com"]),
+  spotify: new Set(["spotify.com"]),
+  disneyplus: new Set(["disneyplus.com"]),
+  steam: new Set(["steampowered.com", "steamcommunity.com"]),
+  roblox: new Set(["roblox.com"]),
+  playstation: new Set(["playstation.com", "sony.com"]),
+
+  // Global E-Commerce & Marketplaces
+  amazon: new Set(["amazon.com", "amazon.in", "amazon.co.uk", "amazon.de", "amazonaws.com"]),
+  flipkart: new Set(["flipkart.com"]),
+  ebay: new Set(["ebay.com", "ebay.in", "ebay.co.uk"]),
+  walmart: new Set(["walmart.com"]),
+  alibaba: new Set(["alibaba.com", "aliexpress.com"]),
+  shopify: new Set(["shopify.com"]),
+  myntra: new Set(["myntra.com"]),
+  meesho: new Set(["meesho.com"]),
+  zomato: new Set(["zomato.com"]),
+  swiggy: new Set(["swiggy.com"]),
+
+  // Global Crypto, Wallets & Fintech
+  paypal: new Set(["paypal.com"]),
+  binance: new Set(["binance.com", "binance.us"]),
+  coinbase: new Set(["coinbase.com"]),
+  metamask: new Set(["metamask.io"]),
+  trustwallet: new Set(["trustwallet.com"]),
+  ledger: new Set(["ledger.com"]),
+  trezor: new Set(["trezor.io"]),
+  kraken: new Set(["kraken.com"]),
+  blockchain: new Set(["blockchain.com"]),
+  opensea: new Set(["opensea.io"]),
+  revolut: new Set(["revolut.com"]),
+  stripe: new Set(["stripe.com"]),
+  cashapp: new Set(["cash.app"]),
+  venmo: new Set(["venmo.com"]),
+  wise: new Set(["wise.com"]),
+
+  // Global Postal, Courier & Logistics
+  fedex: new Set(["fedex.com"]),
+  dhl: new Set(["dhl.com"]),
+  ups: new Set(["ups.com"]),
+  usps: new Set(["usps.com"]),
+  royalmail: new Set(["royalmail.com"]),
+  canadapost: new Set(["canadapost-postescanada.ca", "canadapost.ca"]),
+  auspost: new Set(["auspost.com.au"]),
+  bluedart: new Set(["bluedart.com"]),
+  delhivery: new Set(["delhivery.com"]),
+  dtdc: new Set(["dtdc.in", "dtdc.com"]),
+  indiapost: new Set(["indiapost.gov.in"]),
+
+  // Global Banks & Card Networks
+  chase: new Set(["chase.com"]),
+  bankofamerica: new Set(["bankofamerica.com"]),
+  wellsfargo: new Set(["wellsfargo.com"]),
+  citibank: new Set(["citi.com", "citibank.com"]),
+  hsbc: new Set(["hsbc.com", "hsbc.co.uk"]),
+  barclays: new Set(["barclays.co.uk", "barclays.com"]),
+  santander: new Set(["santander.co.uk", "santander.com"]),
+  capitalone: new Set(["capitalone.com"]),
+  americanexpress: new Set(["americanexpress.com"]),
+  visa: new Set(["visa.com", "visa.co.in"]),
+  mastercard: new Set(["mastercard.com"]),
 
   // Indian Banks & Payments
   sbi: new Set(["sbi.co.in", "onlinesbi.sbi", "sbi.bank.in"]),
@@ -73,28 +148,32 @@ const BRAND_DOMAINS = {
   bhim: new Set(["bhimupi.org.in"]),
   npci: new Set(["npci.org.in"]),
   razorpay: new Set(["razorpay.com"]),
+  bajajfinserv: new Set(["bajajfinserv.in"]),
 
-  // Global Banks
-  chase: new Set(["chase.com"]),
-  bankofamerica: new Set(["bankofamerica.com"]),
-  wellsfargo: new Set(["wellsfargo.com"]),
-  hsbc: new Set(["hsbc.com"]),
-
-  // Telecom, Govt & Delivery
+  // Telecom & Government Portals
   airtel: new Set(["airtel.in"]),
   jio: new Set(["jio.com"]),
   bsnl: new Set(["bsnl.co.in"]),
+  verizon: new Set(["verizon.com"]),
+  tmobile: new Set(["t-mobile.com"]),
   incometax: new Set(["incometax.gov.in"]),
   uidai: new Set(["uidai.gov.in"]),
   aadhaar: new Set(["uidai.gov.in"]),
   epfo: new Set(["epfindia.gov.in"]),
   digilocker: new Set(["digilocker.gov.in"]),
-  indiapost: new Set(["indiapost.gov.in"]),
   irctc: new Set(["irctc.co.in"]),
-  fedex: new Set(["fedex.com"]),
-  bluedart: new Set(["bluedart.com"]),
-  delhivery: new Set(["delhivery.com"])
+  irs: new Set(["irs.gov"]),
+  hmrc: new Set(["gov.uk"])
 };
+
+const DECEPTIVE_DOMAIN_LURE_WORDS = new Set([
+  "verify", "verification", "secure", "security", "login", "signin",
+  "account", "update", "support", "helpdesk", "billing", "confirm",
+  "wallet", "recover", "recovery", "suspend", "suspended", "unlock",
+  "alert", "auth", "authenticate", "webmail", "portal", "identity",
+  "validation", "claim", "refund", "kyc", "parcel", "delivery",
+  "airdrop", "seed", "phish", "phishing", "malware"
+]);
 
 const CONFUSABLE_CHAR_MAP = {
   "\u0430": "a", "\u0410": "a",
@@ -545,6 +624,38 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
     const brandAnalysis = analyzeBrandImpersonation(host, registrableDomain);
     indicators.push(...brandAnalysis.indicators);
     riskScore += brandAnalysis.riskScore;
+
+    // Hyphenated IP pattern in subdomain (e.g. 192-168-1-1.auth-update.com)
+    if (/(?:^|\.)\d{1,3}(?:-\d{1,3}){3}(?:-|\.)/.test(host)) {
+      indicators.push("DASHED_IP_PATTERN_IN_HOSTNAME");
+      riskScore += 3;
+    }
+
+    // Multiple deceptive auth/security lure words chained in an unrecognized hostname
+    // (catches generic global phishing kits targeting brands not in any static list)
+    const { isKnownSafeDomain } = require("./knownSafeDomains");
+    if (!isKnownSafeDomain(registrableDomain) || isFreeUgcOrCloudHosting(host)) {
+      const hostWordTokens = host
+        .split(/[.-]+/)
+        .filter((t) => t.length >= 3);
+      const deceptiveMatches = new Set(
+        hostWordTokens.filter((t) => DECEPTIVE_DOMAIN_LURE_WORDS.has(t))
+      );
+
+      if (deceptiveMatches.size >= 3) {
+        indicators.push("DECEPTIVE_MULTI_LURE_HOSTNAME");
+        riskScore += 4;
+      } else if (deceptiveMatches.size === 2 && !indicators.includes("BRAND_NAME_IN_UNRELATED_DOMAIN")) {
+        indicators.push("DECEPTIVE_AUTH_HOSTNAME_PATTERN");
+        riskScore += 3;
+      }
+
+      const hyphenCount = (mainDomainLabel.match(/-/g) || []).length;
+      if (hyphenCount >= 3 && deceptiveMatches.size >= 1) {
+        indicators.push("EXCESSIVE_HYPHEN_LURE_DOMAIN");
+        riskScore += 3;
+      }
+    }
   }
 
   if (parsedUrl.protocol === "http:") {

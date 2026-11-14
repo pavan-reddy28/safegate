@@ -2,97 +2,79 @@
 
 const { localBlockedDomains } = require("../config/env");
 
-const blockedDomains = new Set(
-  localBlockedDomains.map((domain) => domain.toLowerCase())
-);
+// Built-in on-device threat & phishing/malware test hostnames (combined with env LOCAL_BLOCKED_DOMAINS)
+const BUILTIN_BLOCKED_DOMAINS = new Set([
+  "testsafebrowsing.appspot.com",
+  "malware.testing.google.test",
+  "phishing.testing.google.test",
+  "ianfette.org",
+  "amtso.org"
+]);
+
+const blockedDomains = new Set([
+  ...BUILTIN_BLOCKED_DOMAINS,
+  ...localBlockedDomains.map((domain) => domain.toLowerCase())
+]);
 
 // Known URL shorteners that hide the true destination from the user & local analyzer.
 const URL_SHORTENER_DOMAINS = new Set([
-  "bit.ly",
-  "tinyurl.com",
-  "t.co",
-  "goo.gl",
-  "rb.gy",
-  "cutt.ly",
-  "is.gd",
-  "v.gd",
-  "ow.ly",
-  "shorturl.at",
-  "tiny.cc",
-  "rebrand.ly",
-  "s.id",
-  "bl.ink",
-  "clk.sh",
-  "t.ly",
-  "lnkd.in",
-  "buff.ly",
-  "adf.ly",
-  "short.io",
-  "urlz.fr",
-  "snip.ly",
-  "clck.ru",
-  "soo.gd",
-  "trib.al",
-  "bit.do",
-  "mcaf.ee",
-  "shorte.st"
+  "bit.ly", "tinyurl.com", "t.co", "goo.gl", "rb.gy", "cutt.ly",
+  "is.gd", "v.gd", "ow.ly", "shorturl.at", "shorturl.asia", "tiny.cc",
+  "rebrand.ly", "s.id", "bl.ink", "clk.sh", "t.ly", "lnkd.in",
+  "buff.ly", "adf.ly", "short.io", "urlz.fr", "snip.ly", "clck.ru",
+  "soo.gd", "trib.al", "bit.do", "mcaf.ee", "shorte.st", "dub.sh",
+  "kutt.it", "shrtco.de", "x.co", "x.gd", "u.nu", "han.gl",
+  "me2.do", "vo.la", "qr.ae", "linklyhq.com", "switchy.io", "clc.to"
 ]);
 
 // Free dynamic DNS, disposable tunneling, and abused free-tier hosting suffixes.
 const TUNNEL_OR_DYNAMIC_DNS_DOMAINS = new Set([
-  "ngrok.io",
-  "ngrok-free.app",
-  "ngrok-free.dev",
-  "trycloudflare.com",
-  "loca.lt",
-  "localtunnel.me",
-  "serveo.net",
-  "duckdns.org",
-  "no-ip.org",
-  "no-ip.biz",
-  "hopto.org",
-  "zapto.org",
-  "ddns.net",
-  "000webhostapp.com",
-  "weeblysite.com",
-  "glitch.me",
-  "bplaced.net",
-  "rf.gd",
-  "epizy.com"
+  "ngrok.io", "ngrok.app", "ngrok.dev", "ngrok-free.app", "ngrok-free.dev",
+  "trycloudflare.com", "loca.lt", "localtunnel.me", "serveo.net",
+  "pinggy.link", "zrok.io", "bore.pub",
+  "duckdns.org", "no-ip.org", "no-ip.biz", "hopto.org", "zapto.org",
+  "ddns.net", "dynu.net", "afraid.org", "dyndns.org", "sytes.net",
+  "servehttp.com", "redirectme.net", "bounceme.net", "myftp.org",
+  "000webhostapp.com", "weeblysite.com", "glitch.me", "bplaced.net",
+  "rf.gd", "epizy.com", "infinityfreeapp.com", "byethost.com"
 ]);
 
-// Multi-tenant UGC / static / form platforms frequently abused for phishing landing pages.
-// Not malicious by default, but high risk when paired with banking/KYC/login/scam lures.
+// Multi-tenant UGC, cloud serverless, storage, form builders & paste platforms
+// frequently abused worldwide for phishing kits, credential harvesters & malware drops.
 const FREE_UGC_OR_CLOUD_HOSTING_DOMAINS = new Set([
-  "sites.google.com",
-  "storage.googleapis.com",
-  "firebasestorage.googleapis.com",
-  "blogspot.com",
-  "wordpress.com",
-  "weebly.com",
-  "wixsite.com",
-  "pages.dev",
-  "workers.dev",
-  "vercel.app",
-  "netlify.app",
-  "github.io",
-  "web.app",
-  "firebaseapp.com",
-  "herokuapp.com",
-  "onrender.com",
-  "azurewebsites.net",
-  "cloudfront.net",
-  "s3.amazonaws.com"
+  // Cloud App Engines / Serverless / Containers
+  "appspot.com", "run.app", "cloudfunctions.net", "web.app", "firebaseapp.com",
+  "pages.dev", "workers.dev", "r2.dev", "vercel.app", "netlify.app",
+  "github.io", "gitlab.io", "herokuapp.com", "onrender.com", "fly.dev",
+  "railway.app", "replit.app", "repl.co", "surge.sh", "deno.dev", "val.run",
+  "azurewebsites.net", "web.core.windows.net", "blob.core.windows.net",
+  // Cloud Storage & CDNs abused for HTML smuggling / phishing kits
+  "sites.google.com", "storage.googleapis.com", "firebasestorage.googleapis.com",
+  "cloudfront.net", "s3.amazonaws.com", "digitaloceanspaces.com", "backblazeb2.com",
+  "ipfs.io", "dweb.link", "cf-ipfs.com", "fleek.co",
+  // Website / Form / Paste builders heavily used in global phishing
+  "blogspot.com", "wordpress.com", "weebly.com", "wixsite.com", "notion.site",
+  "canva.site", "carrd.co", "framer.website", "webflow.io", "strikingly.com",
+  "godaddysites.com", "jimdosite.com", "site123.me", "ucoz.com",
+  "forms.gle", "jotform.com", "formstack.com", "typeform.com", "tally.so",
+  "wufoo.com", "cognitoforms.com", "telegra.ph", "pastebin.com", "paste.ee",
+  "rentry.co", "mailchi.mp", "hubspotpagebuilder.com"
 ]);
 
-// High-abuse TLDs frequently seen in automated SMS scam campaigns.
+// High-abuse TLDs frequently seen in global phishing, crypto scams, malware & SMS spam.
 const HIGH_RISK_TLDS = new Set([
   "tk", "ml", "ga", "cf", "gq",
   "cfd", "sbs", "icu", "cam", "top",
   "xyz", "click", "loan", "win", "buzz",
   "rest", "bar", "vip", "work", "monster",
   "zip", "mov", "autos", "cyou", "beauty",
-  "quest", "hair", "skin", "boats", "mom"
+  "quest", "hair", "skin", "boats", "mom",
+  "pw", "cc", "club", "online", "site",
+  "website", "space", "bond", "xin", "bid",
+  "trade", "stream", "download", "racing", "party",
+  "review", "faith", "date", "science", "gdn",
+  "men", "life", "world", "today", "support",
+  "cloud", "su", "ru"
 ]);
 
 function matchesDomainSet(hostname, domainSet) {
@@ -137,6 +119,7 @@ module.exports = {
   isTunnelOrDynamicDns,
   isFreeUgcOrCloudHosting,
   hasHighRiskTld,
+  BUILTIN_BLOCKED_DOMAINS,
   URL_SHORTENER_DOMAINS,
   TUNNEL_OR_DYNAMIC_DNS_DOMAINS,
   FREE_UGC_OR_CLOUD_HOSTING_DOMAINS,

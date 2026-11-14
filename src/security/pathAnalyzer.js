@@ -145,6 +145,11 @@ function analyzePath(rawPath, _pathname) {
     riskScore += 1;
   }
 
+  if (/\/https?:\/\//i.test(decodedPath)) {
+    indicators.push("EMBEDDED_URL_IN_PATH");
+    riskScore += 3;
+  }
+
   const segments = decodedPath.split("/").filter(Boolean);
 
   if (segments.length > 20) {
@@ -162,6 +167,15 @@ function analyzePath(rawPath, _pathname) {
 
   if (sensitivePathSegmentCount > 0) {
     indicators.push("SENSITIVE_PATH_SEGMENT_DETECTED");
+  }
+
+  if (
+    /\b(?:phishing|malware|ransomware|trojan|keylogger|spyware|infostealer|credharvest|phishkit)\b/i.test(
+      decodedPath
+    )
+  ) {
+    indicators.push("EXPLICIT_THREAT_KEYWORD_IN_PATH");
+    riskScore += 5;
   }
 
   const finalSegment = segments.at(-1) || "";
