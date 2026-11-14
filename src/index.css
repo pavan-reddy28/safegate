@@ -20,9 +20,7 @@
     min-width: 320px;
     min-height: 100vh;
     background-color: #090b10;
-    background-image:
-      radial-gradient(ellipse 80% 50% at 50% -15%, rgba(239, 68, 68, 0.12), transparent 60%),
-      radial-gradient(ellipse 50% 40% at 100% 100%, rgba(16, 185, 129, 0.05), transparent 60%);
+    overflow-x: hidden;
   }
 
   button,
@@ -30,5 +28,168 @@
   textarea,
   select {
     font: inherit;
+  }
+}
+
+@keyframes sg-spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes sg-spin-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes sg-pulse-ring {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(1.28);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.28);
+    opacity: 0;
+  }
+}
+
+@keyframes sg-scan-sweep {
+  0% {
+    transform: translateY(-28px);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.9;
+  }
+  82% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(28px);
+    opacity: 0;
+  }
+}
+
+@keyframes sg-card-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.975);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes sg-alert-shake {
+  0% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  30% {
+    opacity: 1;
+    transform: translateX(-5px) scale(1.01);
+  }
+  55% {
+    transform: translateX(4px) scale(1);
+  }
+  78% {
+    transform: translateX(-2px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes sg-float-breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes sg-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+.sg-spin-slow {
+  animation: sg-spin-slow 12s linear infinite;
+}
+
+.sg-spin-fast {
+  animation: sg-spin-slow 2.2s linear infinite;
+}
+
+.sg-spin-reverse {
+  animation: sg-spin-reverse 3.4s linear infinite;
+}
+
+.sg-pulse-ring {
+  animation: sg-pulse-ring 2.4s cubic-bezier(0.2, 0.8, 0.4, 1) infinite;
+}
+
+.sg-pulse-ring-delay {
+  animation: sg-pulse-ring 2.4s cubic-bezier(0.2, 0.8, 0.4, 1) 1.2s infinite;
+}
+
+.sg-scan-sweep {
+  animation: sg-scan-sweep 1.8s ease-in-out infinite;
+}
+
+.sg-card-enter {
+  animation: sg-card-enter 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sg-alert-shake {
+  animation: sg-alert-shake 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sg-float-breathe {
+  animation: sg-float-breathe 3.8s ease-in-out infinite;
+}
+
+.sg-progress-slide {
+  animation: sg-progress-slide 1.3s ease-in-out infinite;
+}
+
+.sg-cyber-grid {
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(ellipse 75% 65% at 50% 42%, black 20%, transparent 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sg-spin-slow,
+  .sg-spin-fast,
+  .sg-spin-reverse,
+  .sg-pulse-ring,
+  .sg-pulse-ring-delay,
+  .sg-scan-sweep,
+  .sg-card-enter,
+  .sg-alert-shake,
+  .sg-float-breathe,
+  .sg-progress-slide {
+    animation: none !important;
   }
 }
