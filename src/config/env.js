@@ -42,7 +42,17 @@ const envSchema = z.object({
     .int()
     .min(1)
     .max(1000)
-    .default(30)
+    .default(30),
+
+  REDIRECT_SIGNING_SECRET: z
+    .string()
+    .optional()
+    .default(""),
+
+  OFFLINE_THREAT_FEED_PATH: z
+    .string()
+    .optional()
+    .default("")
 });
 
 const result = envSchema.safeParse(process.env);
@@ -118,5 +128,7 @@ module.exports = {
   localBlockedDomains,
   rateLimitWindowMs: config.RATE_LIMIT_WINDOW_MS,
   rateLimitMax: config.RATE_LIMIT_MAX,
+  redirectSigningSecret: config.REDIRECT_SIGNING_SECRET,
+  offlineThreatFeedPath: config.OFFLINE_THREAT_FEED_PATH,
   zeroEgressMode: true
 };

@@ -18,8 +18,10 @@ const FINANCIAL_CREDIT_LURE_TERMS = [
   "credited", "amountcredit", "creditamount", "claimamount", "claimreward",
   "cashback", "refund", "taxrefund", "irsrefund", "gstrefund", "itrrefund",
   "lottery", "prize", "jackpot", "winner", "rewardpoints", "redeempoints",
-  "upiclaim", "upireward", "bonusclaim", "subsidy", "giveaway", "freemoney",
+  "upiclaim", "upireward", "bonusclaim", "subsidy", "lpgsubsidy", "giveaway", "freemoney",
   "salarycredited", "instantloan", "loanapproved", "preapproved", "unclaimedfunds",
+  "parttimejob", "workfromhome", "taskreward", "telegramtask", "guaranteedreturn",
+  "doubleyourmoney", "tradingbot", "scholarship",
   "airdrop", "tokenclaim", "stakingreward", "presale", "doublebtc", "ethgiveaway"
 ];
 
@@ -27,6 +29,9 @@ const URGENCY_KYC_LURE_TERMS = [
   // Banking & KYC
   "kyc", "updatekyc", "kycupdate", "kycpending", "panupdate",
   "aadhaarupdate", "aadharupdate", "reverify", "accountblocked",
+  // Pension / Senior Citizen / Welfare Scams targeting Parents & Elders
+  "jeevanpramaan", "lifecertificate", "pensionupdate", "seniorcitizen",
+  "ayushman", "rationcard",
   // Global Account Compromise / Suspension / Billing Scams
   "accountsuspended", "accountlocked", "accountdisabled", "accountrestricted",
   "unblockaccount", "unlockaccount", "recoveraccount", "reactivate",

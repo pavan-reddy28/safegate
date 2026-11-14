@@ -99,7 +99,7 @@ function buildSecurityChecksSummary(localAnalysis) {
     schemeAndEncodingCheck: isBlocked && ["UNSUPPORTED_OR_DANGEROUS_SCHEME", "CONTROL_CHARACTERS_FOUND", "INVISIBLE_OR_BIDI_CHARACTERS_FOUND", "UNICODE_SPOOF_CHARACTERS_FOUND", "ENCODED_SPOOF_OR_NULL_SEQUENCE", "ENCODED_CONTROL_CHARACTER", "INJECTED_SCRIPT_IN_PATH", "HTML_SMUGGLING_PAYLOAD_DETECTED"].includes(localAnalysis.reasonCodes?.[0])
       ? "FAILED"
       : "PASSED",
-    networkAndIpIsolationCheck: isBlocked && ["NON_PUBLIC_IP_ADDRESS", "OBFUSCATED_IP_EVASION", "NON_PUBLIC_HOSTNAME", "DANGEROUS_NON_WEB_PORT", "LOCAL_THREAT_LIST_MATCH", "COMPOUND_DIRECT_IP_ATTACK"].includes(localAnalysis.reasonCodes?.[0])
+    networkAndIpIsolationCheck: isBlocked && ["NON_PUBLIC_IP_ADDRESS", "OBFUSCATED_IP_EVASION", "NON_PUBLIC_HOSTNAME", "DANGEROUS_NON_WEB_PORT", "LOCAL_THREAT_LIST_MATCH", "OFFLINE_THREAT_FEED_MATCH", "COMPOUND_DIRECT_IP_ATTACK"].includes(localAnalysis.reasonCodes?.[0])
       ? "FAILED"
       : indicators.includes("OBFUSCATED_IP_HOST") || indicators.includes("PUBLIC_IP_LITERAL_HOST") || indicators.includes("SUSPICIOUS_SERVICE_PORT")
         ? "FLAGGED"
@@ -139,7 +139,7 @@ function buildSecurityChecksSummary(localAnalysis) {
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED",
     redirectAndSmugglingCheck: indicators.some((i) =>
-      ["DANGEROUS_REDIRECT_SCHEME", "MALFORMED_PROTOCOL_RELATIVE_REDIRECT", "NESTED_REDIRECT_CONTAINS_CREDENTIALS", "NESTED_REDIRECT_DESTINATION_BLOCKED", "NESTED_REDIRECT_TO_MOBILE_INSTALLER", "NESTED_REDIRECT_TO_MOBILE_CONFIG_OR_CERT", "NESTED_REDIRECT_HIGH_RISK_TARGET", "NESTED_REDIRECT_RISK_PROPAGATED", "BASE64_SMUGGLED_REDIRECT", "HEX_SMUGGLED_REDIRECT", "HTML_SMUGGLING_PAYLOAD_DETECTED", "FRAGMENT_SMUGGLED_REDIRECT_OR_PAYLOAD", "SUSPICIOUS_NESTED_REDIRECT_DOMAIN", "FRAGMENT_VICTIM_EMAIL_PREFILL_KIT"].includes(i)
+      ["DANGEROUS_REDIRECT_SCHEME", "MALFORMED_PROTOCOL_RELATIVE_REDIRECT", "ANDROID_INTENT_PARAM_FALLBACK_TRAP", "NESTED_REDIRECT_CONTAINS_CREDENTIALS", "NESTED_REDIRECT_DESTINATION_BLOCKED", "NESTED_REDIRECT_TO_MOBILE_INSTALLER", "NESTED_REDIRECT_TO_MOBILE_CONFIG_OR_CERT", "NESTED_REDIRECT_HIGH_RISK_TARGET", "NESTED_REDIRECT_RISK_PROPAGATED", "BASE64_SMUGGLED_REDIRECT", "HEX_SMUGGLED_REDIRECT", "HTML_SMUGGLING_PAYLOAD_DETECTED", "FRAGMENT_SMUGGLED_REDIRECT_OR_PAYLOAD", "SUSPICIOUS_NESTED_REDIRECT_DOMAIN", "FRAGMENT_VICTIM_EMAIL_PREFILL_KIT"].includes(i)
     )
       ? (isBlocked ? "FAILED" : "FLAGGED")
       : "PASSED",
@@ -196,7 +196,7 @@ function buildRiskSummary({
       score: riskScore ?? 0,
       headline: `Verified official destination (${host})`,
       parentAdvisory:
-        "This link points to an authoritative official domain or infrastructure IP over HTTPS and passed all 25 on-device security checks with zero data leaving your phone.",
+        "This link points to an authoritative official domain or infrastructure IP over HTTPS and passed all 30 on-device security checks with zero data leaving your phone.",
       reasons: finalReasonCodes,
       indicatorsCount: indicators.length
     };
@@ -208,7 +208,7 @@ function buildRiskSummary({
       score: riskScore ?? 0,
       headline: `Held for confirmation (${host})`,
       parentAdvisory:
-        "This link passed all 25 on-device checks, but its domain is unverified and remote reputation lookup is disabled to guarantee zero data leakage. Only open it if you personally trust the sender.",
+        "This link passed all 30 on-device checks, but its domain is unverified and remote reputation lookup is disabled to guarantee zero data leakage. Only open it if you personally trust the sender.",
       reasons: finalReasonCodes,
       indicatorsCount: indicators.length
     };
@@ -219,7 +219,7 @@ function buildRiskSummary({
     score: riskScore ?? 0,
     headline: `No local threats detected (${host})`,
     parentAdvisory:
-      "All 25 on-device security checks passed with zero external network calls. Still never enter your UPI PIN, OTP, CVV, or password unless you are 100% sure you trust this website.",
+      "All 30 on-device security checks passed with zero external network calls. Still never enter your UPI PIN, OTP, CVV, or password unless you are 100% sure you trust this website.",
     reasons: finalReasonCodes,
     indicatorsCount: indicators.length
   };
@@ -230,7 +230,10 @@ const LAYERS_EXECUTED = [
   "HTTP_BOUNDARY_AND_HEADER_HARDENING",
   "ANTI_EVASION_URL_AND_UNICODE_NFKC_NORMALIZATION",
   "NON_PUBLIC_IP_BOGON_AND_PORT_ISOLATION",
+  "OFFLINE_SIGNED_BLOOM_THREAT_FEED_MATCHER",
   "UNICODE_HOMOGRAPH_NFD_CONFUSABLE_SKELETON",
+  "DAMERAU_TRANSPOSITION_TYPOSQUAT_DETECTOR",
+  "PHONETIC_AND_REPEATED_CHAR_SPOOF_DETECTOR",
   "MOBILE_VIEWPORT_SUBDOMAIN_TRUNCATION_SHIELD",
   "SUBDOMAIN_AND_LEET_BRAND_SPOOF_DETECTION",
   "UNIVERSAL_SUBDOMAIN_TLD_MASQUERADE_SHIELD",
@@ -242,14 +245,16 @@ const LAYERS_EXECUTED = [
   "HTML_SMUGGLING_SVG_AND_MHTML_PAYLOAD_GUARD",
   "BASE64_AND_HEX_SMUGGLED_REDIRECT_DECODER",
   "MULTI_HOP_RECURSIVE_REDIRECT_RISK_PROPAGATOR",
+  "ANDROID_INTENT_FALLBACK_AND_DEEP_LINK_TRAP_SHIELD",
   "FRAGMENT_PAYLOAD_AND_EMAIL_PREFILL_DETECTOR",
   "UPI_COLLECT_AND_PAYMENT_SMUGGLING_SHIELD",
   "REMOTE_ACCESS_TROJAN_AND_DIGITAL_ARREST_LURE_ENGINE",
+  "SENIOR_WELFARE_AND_JOB_TASK_FRAUD_DETECTOR",
   "SMS_SCAM_AND_UPI_CREDENTIAL_LURE_ENGINE",
   "MULTI_VECTOR_LEXICAL_INTENT_CLASSIFIER",
   "CROSS_LAYER_COMPOUND_THREAT_CORRELATOR",
   "KNOWN_SAFE_OFFICIAL_DOMAIN_POLICY",
-  "EPHEMERAL_HMAC_REDIRECT_TOKEN",
+  "SINGLE_USE_JTI_HMAC_REDIRECT_TOKEN",
   "RUNTIME_ZERO_LEAKAGE_AND_LOG_REDACTION_ASSERTION"
 ];
 

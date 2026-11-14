@@ -31,7 +31,8 @@ const INTENT_VECTORS = {
   FINANCIAL_LURE: [
     "pay", "payment", "billing", "invoice", "receipt", "refund", "tax", "rebate",
     "claim", "reward", "bonus", "cashback", "credit", "credited", "prize", "winner",
-    "lottery", "jackpot", "gift", "giveaway", "subsidy", "loan", "payout", "upi"
+    "lottery", "jackpot", "gift", "giveaway", "subsidy", "loan", "payout", "upi",
+    "pension", "taskreward", "guaranteedreturn", "workfromhome", "scholarship"
   ],
   DELIVERY_LOGISTICS: [
     "parcel", "package", "delivery", "redeliver", "customs", "postage",
@@ -57,7 +58,8 @@ const INTENT_VECTORS = {
   ],
   GOVT_EXTORTION: [
     "digitalarrest", "cybercrime", "warrant", "courtnotice", "simdeactivate",
-    "trai", "aadhaarlock", "panlink", "collectrequest", "upimandate", "autopay"
+    "trai", "aadhaarlock", "panlink", "collectrequest", "upimandate", "autopay",
+    "jeevanpramaan", "lifecertificate", "ayushman", "rationcard"
   ]
 };
 

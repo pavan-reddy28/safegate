@@ -1,21 +1,37 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const env = require("../config/env");
 
 /**
  * redirectToken.js
  *
- * Issues and verifies short-lived HMAC-SHA256 verification tokens bound
+ * Issues and verifies single-use short-lived HMAC-SHA256 verification tokens bound
  * to the SHA-256 digest of the checked URL and the SafeGate verdict.
  *
- * PRIVACY GUARANTEE:
- * - Secret key is generated randomly in memory per process boot and never persisted.
- * - The token contains ONLY a SHA-256 hash of the URL, never the URL itself.
- * - Prevents frontend redirect bypass or URL swap attacks between verification and navigation.
+ * PRIVACY & REPLAY GUARANTEE:
+ * - Uses Keystore-provisioned REDIRECT_SIGNING_SECRET when provided (>= 32 chars),
+ *   or an in-memory random 256-bit key generated per process boot.
+ * - Contains ONLY a SHA-256 hash of the URL + single-use jti, never the raw URL.
+ * - Prevents frontend redirect bypass, URL swap attacks, and token replay.
  */
 
-const EPHEMERAL_HMAC_SECRET = crypto.randomBytes(32);
+const HMAC_KEY =
+  env.redirectSigningSecret && env.redirectSigningSecret.length >= 32
+    ? crypto.createHash("sha256").update(env.redirectSigningSecret, "utf8").digest()
+    : crypto.randomBytes(32);
+
 const DEFAULT_TTL_SECONDS = 90;
+const MAX_REPLAY_CACHE = 4096;
+
+/** @type {Map<string, number>} */
+const consumedJtis = new Map();
+
+function pruneConsumedJtis(nowSec) {
+  for (const [jti, exp] of consumedJtis) {
+    if (exp < nowSec) consumedJtis.delete(jti);
+  }
+}
 
 function hashUrlForBinding(url) {
   return crypto
@@ -26,7 +42,7 @@ function hashUrlForBinding(url) {
 
 function signPayload(encodedPayload) {
   return crypto
-    .createHmac("sha256", EPHEMERAL_HMAC_SECRET)
+    .createHmac("sha256", HMAC_KEY)
     .update(encodedPayload, "utf8")
     .digest("base64url");
 }
@@ -44,6 +60,7 @@ function issueRedirectToken({ url, finalDecision, recommendedAction, requestId }
 
   const nowSec = Math.floor(Date.now() / 1000);
   const payload = {
+    jti: crypto.randomUUID(),
     uh: hashUrlForBinding(url),
     dec: finalDecision,
     act: recommendedAction,
@@ -104,6 +121,10 @@ function verifyRedirectToken({ url, token, userConfirmedWarning = false }) {
     return { authorized: false, reasonCode: "URL_BINDING_MISMATCH" };
   }
 
+  if (typeof payload.jti === "string" && consumedJtis.has(payload.jti)) {
+    return { authorized: false, reasonCode: "VERIFICATION_TOKEN_ALREADY_CONSUMED" };
+  }
+
   if (payload.act === "DO_NOT_OPEN" || payload.dec === "BLOCK") {
     return {
       authorized: false,
@@ -126,6 +147,15 @@ function verifyRedirectToken({ url, token, userConfirmedWarning = false }) {
       reasonCode: "HOLD_REPUTATION_UNAVAILABLE_CONFIRMATION_REQUIRED",
       finalDecision: payload.dec
     };
+  }
+
+  if (typeof payload.jti === "string") {
+    pruneConsumedJtis(nowSec);
+    if (consumedJtis.size >= MAX_REPLAY_CACHE) {
+      const oldest = consumedJtis.keys().next().value;
+      if (oldest !== undefined) consumedJtis.delete(oldest);
+    }
+    consumedJtis.set(payload.jti, payload.exp);
   }
 
   return {

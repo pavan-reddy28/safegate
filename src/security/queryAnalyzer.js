@@ -11,8 +11,13 @@ const REDIRECT_PARAMETERS = new Set([
   "redirectto", "redir", "redirurl", "return", "returnto", "returnurl", "ret", "returl",
   "next", "nexturl", "continue", "continueurl", "dest", "desturl", "destination",
   "target", "targeturl", "goto", "go", "jump", "callback", "out", "to",
-  "forward", "fallback", "successurl", "failurl", "clickurl", "adurl", "linkurl",
+  "forward", "fallback", "fallbackurl", "sbrowserfallbackurl", "apkurl", "downloadurl",
+  "successurl", "failurl", "clickurl", "adurl", "linkurl",
   "postlogoutredirecturi", "logouturi", "canceluri", "link", "href"
+]);
+
+const ANDROID_INTENT_PARAM_KEYS = new Set([
+  "sbrowserfallbackurl", "fallbackurl", "apkurl", "launchurl", "deeplink"
 ]);
 
 const SENSITIVE_PARAMETERS = new Set([
@@ -372,6 +377,11 @@ function analyzeQuery(parsedUrl) {
       state.indicators.push("REDIRECT_PARAMETER_PRESENT");
     }
 
+    if (ANDROID_INTENT_PARAM_KEYS.has(normalizedKey)) {
+      state.indicators.push("ANDROID_INTENT_PARAM_FALLBACK_TRAP");
+      state.riskScore += 3;
+    }
+
     if (isSensitive) {
       sensitiveParameterCount++;
       state.indicators.push("SENSITIVE_QUERY_PARAMETER_PRESENT");
@@ -472,9 +482,13 @@ function analyzeQuery(parsedUrl) {
       state.indicators.push("SENSITIVE_FRAGMENT_DETECTED");
     }
 
-    // Inspect dangerous schemes, URLs, or Base64/Hex smuggling hidden in #fragment
+    // Inspect dangerous schemes, Android #Intent; URI blocks, URLs, or Base64/Hex smuggling hidden in #fragment
     const fragSchemeProbe = fragTrimmed.replace(/[\u0000-\u0020\u200B-\u200F\uFEFF\u007f]/g, "");
-    if (DANGEROUS_SCHEME.test(fragSchemeProbe)) {
+    if (/^Intent;/i.test(fragTrimmed) || /;S\.browser_fallback_url=/i.test(fragTrimmed)) {
+      state.indicators.push("ANDROID_INTENT_PARAM_FALLBACK_TRAP");
+      state.indicators.push("FRAGMENT_SMUGGLED_REDIRECT_OR_PAYLOAD");
+      state.hardBlockReason = "ANDROID_INTENT_PARAM_FALLBACK_TRAP";
+    } else if (DANGEROUS_SCHEME.test(fragSchemeProbe)) {
       state.indicators.push("FRAGMENT_SMUGGLED_REDIRECT_OR_PAYLOAD");
       state.indicators.push("DANGEROUS_REDIRECT_SCHEME");
       state.hardBlockReason = "DANGEROUS_REDIRECT_SCHEME";

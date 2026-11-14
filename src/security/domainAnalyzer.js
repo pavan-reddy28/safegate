@@ -6,6 +6,7 @@ const { parse: parseDomain } = require("tldts");
 
 const {
   isBlockedHost,
+  isOfflineFeedMatch,
   isUrlShortener,
   isTunnelOrDynamicDns,
   isFreeUgcOrCloudHosting,
@@ -327,21 +328,29 @@ function hasMixedScripts(hostname) {
   return securityRelevant.length > 1;
 }
 
+// Optimal String Alignment (Restricted Damerau-Levenshtein) edit distance:
+// catches adjacent character transpositions (e.g. payapl, goolge, amzaon) at distance 1
 function editDistance(a, b) {
-  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    const current = [i];
-    for (let j = 1; j <= b.length; j++) {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      current[j] = Math.min(
-        current[j - 1] + 1,
-        previous[j] + 1,
-        previous[j - 1] + cost
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
       );
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1);
+      }
     }
-    previous = current;
   }
-  return previous[b.length];
+  return dp[m][n];
 }
 
 function editDistanceAtMost(a, b, maxDist) {
@@ -415,9 +424,27 @@ function analyzeBrandImpersonation(hostname, registrableDomain) {
 
     const maxTypos = brand.length >= 6 ? 2 : brand.length >= 4 ? 1 : 0;
 
+    const shortBrandGluedPattern = /^(?:kyc|login|signin|verify|update|secure|auth|alert|parcel|delivery|tax|refund|reward|recharge|support|care|bank|netbanking|portal|online|pay|help)/;
+    const collapseRepeats = (s) => String(s || "").replace(/(.)\1+/g, "$1");
+    const toPhonetic = (s) => collapseRepeats(s).replace(/ph/g, "f").replace(/ck|q/g, "k").replace(/z/g, "s");
+    const brandCollapsed = collapseRepeats(brand);
+    const brandPhonetic = toPhonetic(brand);
+
     const directOrSubMatch = allTokenVariants.some((token) => {
       if (token === brand) return true;
       if (brand.length >= 4 && token.includes(brand)) return true;
+      // Catch 3-letter brands glued to a phishing lure without hyphens (e.g. sbikyc, dhldelivery, irstax)
+      if (brand.length === 3 && token.length >= 6 && token.startsWith(brand)) {
+        const suffix = token.slice(3);
+        if (shortBrandGluedPattern.test(suffix)) return true;
+      }
+      if (
+        brand.length >= 5 &&
+        token.length >= 5 &&
+        (collapseRepeats(token) === brandCollapsed || toPhonetic(token) === brandPhonetic)
+      ) {
+        return true;
+      }
       if (maxTypos > 0 && token.length >= 4 && editDistanceAtMost(token, brand, maxTypos)) {
         return true;
       }
@@ -507,6 +534,15 @@ function analyzeDomain(hostname, parsedUrl, options = {}) {
       reasonCode: "LOCAL_THREAT_LIST_MATCH",
       indicators,
       riskScore
+    };
+  }
+
+  if (isOfflineFeedMatch(host, parsedUrl?.href || "")) {
+    return {
+      blocked: true,
+      reasonCode: "OFFLINE_THREAT_FEED_MATCH",
+      indicators: ["OFFLINE_THREAT_FEED_MATCH"],
+      riskScore: 10
     };
   }
 

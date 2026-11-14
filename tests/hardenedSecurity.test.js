@@ -437,6 +437,112 @@ test("Blocks mobile viewport subdomain spoofing, phishing kit endpoints, accente
   assert.equal(ipPortCompound.reasonCodes[0], "COMPOUND_DIRECT_IP_ATTACK");
 });
 
+test("Catches Damerau transposition typosquats, glued 3-letter brand scams, Discord CDN drops, and senior/task scams", () => {
+  const transposed = analyzeUrl("https://payapl.com/home");
+  assert.equal(transposed.decision, "SUSPICIOUS");
+  assert.ok(
+    transposed.indicators.includes("BRAND_NAME_IN_UNRELATED_DOMAIN") ||
+      transposed.indicators.includes("POSSIBLE_BRAND_LOOKALIKE_DOMAIN")
+  );
+
+  const gluedSbi = analyzeUrl("https://sbikycupdates.com/verify");
+  assert.equal(gluedSbi.decision, "BLOCK");
+  assert.ok(gluedSbi.indicators.includes("BRAND_NAME_IN_UNRELATED_DOMAIN"));
+
+  // Benign word starting with 'ups' must NOT falsely match 'ups' courier brand
+  const benignUps = analyzeUrl("https://upscale.com/about");
+  assert.equal(benignUps.indicators.includes("BRAND_NAME_IN_UNRELATED_DOMAIN"), false);
+
+  const discordPhish = analyzeUrl("https://cdn.discordapp.com/attachments/123/456/bank_kyc_update.html");
+  assert.equal(discordPhish.decision, "BLOCK");
+
+  const pensionScam = analyzeUrl("https://senior-portal-help.top/jeevanpramaan/lifecertificate-update");
+  assert.equal(pensionScam.decision, "BLOCK");
+});
+
+test("Signed offline Bloom/hash threat feed blocks zero-day neutral URLs locally and rejects tampered signatures", () => {
+  const crypto = require("node:crypto");
+  const {
+    OfflineBloomFilter,
+    defaultOfflineFeed,
+    sha256Hex
+  } = require("../src/security/offlineThreatFeed");
+
+  const hmacSecret = "super-strong-local-keystore-secret-key-2026";
+  const domains = ["zero-day-neutral-phish.example.org"];
+  const domainHashes = [sha256Hex("zero-day-neutral-phish.example.org")];
+  const urlHashes = [];
+  const canonical = JSON.stringify({ version: 2, domains, domainHashes, urlHashes });
+  const signature = crypto.createHmac("sha256", hmacSecret).update(canonical, "utf8").digest("base64");
+
+  assert.throws(() => {
+    defaultOfflineFeed.loadManifest(
+      { version: 2, domains, domainHashes, urlHashes, signature: Buffer.from("bad").toString("base64") },
+      { hmacSecret }
+    );
+  });
+
+  const bloom = new OfflineBloomFilter(1024, 4);
+  bloom.add("zero-day-neutral-phish.example.org");
+
+  try {
+    defaultOfflineFeed.loadManifest(
+      {
+        version: 2,
+        domains,
+        domainHashes,
+        urlHashes,
+        signature,
+        bloom: { bitsBase64: bloom.bytes.toString("base64"), bitSize: 1024, hashCount: 4 }
+      },
+      { hmacSecret }
+    );
+
+    const res = analyzeUrl("https://zero-day-neutral-phish.example.org/p/9283");
+    assert.equal(res.decision, "BLOCK");
+    assert.equal(res.reasonCodes[0], "OFFLINE_THREAT_FEED_MATCH");
+  } finally {
+    defaultOfflineFeed.clear();
+  }
+});
+
+test("Enforces single-use JTI replay protection on verification tokens", () => {
+  const url = "https://www.sbi.co.in/home";
+  const token = issueRedirectToken({
+    url,
+    finalDecision: "KNOWN_SAFE",
+    recommendedAction: "ALLOW",
+    requestId: "req-jti-1"
+  });
+
+  const firstUse = verifyRedirectToken({ url, token });
+  assert.equal(firstUse.authorized, true);
+
+  const replayUse = verifyRedirectToken({ url, token });
+  assert.equal(replayUse.authorized, false);
+  assert.equal(replayUse.reasonCode, "VERIFICATION_TOKEN_ALREADY_CONSUMED");
+});
+
+test("Detects phonetic/repeated-char typosquats and Android Intent fallback/#Intent; deep-link traps across 30 layers", async () => {
+  const repeatedBrand = analyzeUrl("https://paypaal.com/home");
+  assert.equal(repeatedBrand.decision, "SUSPICIOUS");
+  assert.ok(repeatedBrand.indicators.includes("BRAND_NAME_IN_UNRELATED_DOMAIN"));
+
+  const intentFallback = analyzeUrl(
+    "https://promo.example.org/open?S.browser_fallback_url=https%3A%2F%2Fevil.top%2Fapp.apk"
+  );
+  assert.equal(intentFallback.decision, "BLOCK");
+
+  const fragmentIntent = analyzeUrl(
+    "https://example.org/go#Intent;scheme=upi;package=com.evil;end"
+  );
+  assert.equal(fragmentIntent.decision, "BLOCK");
+  assert.equal(fragmentIntent.reasonCodes[0], "ANDROID_INTENT_PARAM_FALLBACK_TRAP");
+
+  const fullVerify = await verifyUrl("https://www.sbi.co.in/personal", "req-30-layers");
+  assert.equal(fullVerify.layersExecuted.length, 30);
+});
+
 // --------------------------------------------------
 // 2. OFFICIAL BANKING & ZERO-EGRESS PRIVACY GUARANTEES
 // --------------------------------------------------

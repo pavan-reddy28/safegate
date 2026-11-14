@@ -1,6 +1,7 @@
 "use strict";
 
 const { localBlockedDomains } = require("../config/env");
+const { defaultOfflineFeed } = require("./offlineThreatFeed");
 
 // Optional user-configured domain blocklist loaded strictly from local .env (no hardcoded URL cheats)
 const blockedDomains = new Set(
@@ -39,8 +40,9 @@ const FREE_UGC_OR_CLOUD_HOSTING_DOMAINS = new Set([
   "github.io", "gitlab.io", "herokuapp.com", "onrender.com", "fly.dev",
   "railway.app", "replit.app", "repl.co", "surge.sh", "deno.dev", "val.run",
   "azurewebsites.net", "web.core.windows.net", "blob.core.windows.net",
-  // Cloud Storage & CDNs abused for HTML smuggling / phishing kits
+  // Cloud Storage & CDNs abused for HTML smuggling / phishing kits / malware drops
   "sites.google.com", "storage.googleapis.com", "firebasestorage.googleapis.com",
+  "raw.githubusercontent.com", "cdn.discordapp.com",
   "cloudfront.net", "s3.amazonaws.com", "digitaloceanspaces.com", "backblazeb2.com",
   "ipfs.io", "dweb.link", "cf-ipfs.com", "fleek.co",
   // Website / Form / Paste builders heavily used in global phishing
@@ -84,6 +86,10 @@ function isBlockedHost(hostname) {
   return matchesDomainSet(hostname, blockedDomains);
 }
 
+function isOfflineFeedMatch(hostname, rawUrl = "") {
+  return defaultOfflineFeed.matchesDomain(hostname) || (rawUrl ? defaultOfflineFeed.matchesUrl(rawUrl) : false);
+}
+
 function isUrlShortener(hostname) {
   return matchesDomainSet(hostname, URL_SHORTENER_DOMAINS);
 }
@@ -106,6 +112,7 @@ function hasHighRiskTld(hostname) {
 
 module.exports = {
   isBlockedHost,
+  isOfflineFeedMatch,
   isUrlShortener,
   isTunnelOrDynamicDns,
   isFreeUgcOrCloudHosting,
