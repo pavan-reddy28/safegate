@@ -1,6 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { createDeviceUrlFingerprint } from "./urlFingerprint.js";
 import { analyzeUrlOffline } from "./offlineEngine.js";
+import { getSafeGateDatabase } from "./sqliteDatabase.js";
 import {
   persistBlockedUrl,
   getBlockDetails,
@@ -14,8 +15,25 @@ import {
   syncVerificationToCloud,
   fetchCloudDecisionByRequestId,
   rememberRequestForFingerprint,
-  lookupRequestForFingerprint
+  lookupRequestForFingerprint,
+  getOrCreateDeviceId,
+  resolveDeviceName
 } from "./cloudSync.js";
+
+let warmupPromise = null;
+
+export function warmupVerificationEngine() {
+  if (!warmupPromise) {
+    warmupPromise = Promise.allSettled([
+      Promise.resolve().then(() => getOrCreateDeviceId()),
+      resolveDeviceName().catch(() => null),
+      Capacitor.getPlatform() === "android"
+        ? getSafeGateDatabase().catch(() => null)
+        : Promise.resolve(null)
+    ]);
+  }
+  return warmupPromise;
+}
 
 const isNative = Capacitor.isNativePlatform();
 
@@ -231,6 +249,74 @@ function buildCloudUnblockResponse(requestId, originOnly) {
   };
 }
 
+function buildCloudPolicyDecisionResponse(cloudDecision, requestId, originOnly) {
+  const displayHost = originOnly ? originOnly.replace(/^https?:\/\//, "") : "monitored-destination";
+  const normalizedDecision = String(cloudDecision?.decision || "HOLD").toUpperCase();
+  const isSuspicious = normalizedDecision === "SUSPICIOUS";
+  const reasonCodes =
+    Array.isArray(cloudDecision?.reasons) && cloudDecision.reasons.length > 0
+      ? cloudDecision.reasons
+      : [isSuspicious ? "OPERATOR_MARKED_SUSPICIOUS" : "OPERATOR_PLACED_HOLD"];
+  const score = Number.isInteger(cloudDecision?.score)
+    ? cloudDecision.score
+    : isSuspicious
+      ? 65
+      : 30;
+
+  return {
+    verificationStatus: "COMPLETED",
+    requestId,
+    engineMode: "CLOUD_OPERATOR_OVERRIDE",
+    cloudOverride: true,
+    localVerification: {
+      decision: isSuspicious ? "SUSPICIOUS" : "REPUTATION_CHECK_REQUIRED",
+      stage: "CLOUD_OPERATOR_OVERRIDE",
+      reasonCodes,
+      indicators: reasonCodes,
+      destination: null,
+      redactedDestination: {
+        originOnly: originOnly || displayHost,
+        displayHost,
+        privateComponentsStripped: true
+      },
+      riskScore: score,
+      reputationCheckRequired: !isSuspicious
+    },
+    securityChecks: {
+      zeroEgressGuaranteed: true,
+      schemeAndEncodingCheck: "PASSED",
+      networkAndIpIsolationCheck: "PASSED",
+      homographAndBrandSpoofCheck: isSuspicious ? "FLAGGED" : "PASSED",
+      malwareAndPathCheck: isSuspicious ? "FLAGGED" : "PASSED",
+      redirectAndSmugglingCheck: "PASSED",
+      smsScamLureCheck: isSuspicious ? "FLAGGED" : "PASSED"
+    },
+    finalDecision: isSuspicious ? "SUSPICIOUS" : "HOLD",
+    recommendedAction: cloudDecision?.recommendedAction || (isSuspicious ? "WARN_USER" : "HOLD"),
+    finalReasonCodes: reasonCodes,
+    verificationToken: `offline:${requestId}`,
+    riskSummary: {
+      level: isSuspicious ? "HIGH" : "MEDIUM",
+      score,
+      headline: isSuspicious
+        ? `Marked suspicious by operator (${displayHost})`
+        : `Placed on hold by operator (${displayHost})`,
+      parentAdvisory: isSuspicious
+        ? "Security policy flagged this destination as suspicious. Proceed only if you trust the sender."
+        : "Security policy placed this link under manual review.",
+      reasons: reasonCodes,
+      indicatorsCount: reasonCodes.length
+    },
+    layersExecuted: ["CLOUD_OPERATOR_DECISION_OVERRIDE"],
+    cloudSync: {
+      synced: true,
+      configured: true,
+      requestId,
+      status: cloudDecision?.status || "OPEN"
+    }
+  };
+}
+
 async function persistConfirmedBlock(fingerprint, originHost, result, requestId) {
   if (!fingerprint) return "SKIPPED";
   try {
@@ -250,6 +336,8 @@ async function persistConfirmedBlock(fingerprint, originHost, result, requestId)
 export async function verifyDestination(input, options = {}) {
   const fallbackRequestId = createRequestId();
   const skipVaultCache = Boolean(options.skipVaultCache);
+  const backgroundCloudSync = Boolean(options.backgroundCloudSync);
+  const stage1TimeoutMs = Number.isFinite(options.stage1TimeoutMs) ? options.stage1TimeoutMs : 1200;
   const cloudConfigured = !options.skipCloudSync && isCloudSyncConfigured();
 
   let fpData;
@@ -267,14 +355,31 @@ export async function verifyDestination(input, options = {}) {
       if (existingBlock) {
         const blockResp = buildPersistentBlockResponse(existingBlock, fallbackRequestId, fpData.originOnly);
         if (cloudConfigured && existingBlock.requestId && existingBlock.requestId !== "UNKNOWN") {
-          const cloudDecision = await fetchCloudDecisionByRequestId(existingBlock.requestId);
-          if (cloudDecision?.found && cloudDecision.allowOpen) {
-            await removeBlockedUrl(fpData.fingerprint).catch(() => {});
-            rememberRequestForFingerprint(fpData.fingerprint, existingBlock.requestId, "SAFE");
-            return buildCloudUnblockResponse(existingBlock.requestId, fpData.originOnly);
+          const cloudDecision = await fetchCloudDecisionByRequestId(existingBlock.requestId, {
+            timeoutMs: stage1TimeoutMs
+          });
+          if (cloudDecision?.found) {
+            if (cloudDecision.allowOpen) {
+              await removeBlockedUrl(fpData.fingerprint).catch(() => {});
+              rememberRequestForFingerprint(fpData.fingerprint, existingBlock.requestId, cloudDecision.decision || "SAFE");
+              return buildCloudUnblockResponse(existingBlock.requestId, fpData.originOnly);
+            }
+            if (
+              !cloudDecision.blocked &&
+              (cloudDecision.decision === "SUSPICIOUS" ||
+                cloudDecision.decision === "HOLD" ||
+                cloudDecision.overrideActive)
+            ) {
+              await removeBlockedUrl(fpData.fingerprint).catch(() => {});
+              rememberRequestForFingerprint(fpData.fingerprint, existingBlock.requestId, cloudDecision.decision);
+              return buildCloudPolicyDecisionResponse(cloudDecision, existingBlock.requestId, fpData.originOnly);
+            }
           }
           if (!cloudDecision?.found && cloudDecision?.statusCode === 404) {
-            await syncVerificationToCloud(input, blockResp).catch(() => null);
+            const retryUpload = syncVerificationToCloud(input, blockResp).catch(() => null);
+            if (!backgroundCloudSync) {
+              await retryUpload;
+            }
           }
         }
         return cloudConfigured
@@ -285,14 +390,19 @@ export async function verifyDestination(input, options = {}) {
       if (cloudConfigured) {
         const prior = lookupRequestForFingerprint(fpData.fingerprint);
         if (prior?.requestId) {
-          const cloudDecision = await fetchCloudDecisionByRequestId(prior.requestId);
+          const cloudDecision = await fetchCloudDecisionByRequestId(prior.requestId, {
+            timeoutMs: stage1TimeoutMs
+          });
           if (cloudDecision?.found) {
             if (cloudDecision.blocked) {
               const blockOverride = buildPersistentBlockResponse(
                 {
                   requestId: prior.requestId,
                   originHost: fpData.originOnly,
-                  reasonCodes: ["OPERATOR_BLOCKED_REQUEST_ID"]
+                  reasonCodes:
+                    Array.isArray(cloudDecision.reasons) && cloudDecision.reasons.length > 0
+                      ? cloudDecision.reasons
+                      : ["OPERATOR_BLOCKED_REQUEST_ID"]
                 },
                 prior.requestId,
                 fpData.originOnly,
@@ -310,6 +420,13 @@ export async function verifyDestination(input, options = {}) {
             if (cloudDecision.allowOpen) {
               rememberRequestForFingerprint(fpData.fingerprint, prior.requestId, cloudDecision.decision);
               return buildCloudUnblockResponse(prior.requestId, fpData.originOnly);
+            }
+            if (
+              cloudDecision.overrideActive ||
+              (cloudDecision.decision && cloudDecision.decision !== prior.decision)
+            ) {
+              rememberRequestForFingerprint(fpData.fingerprint, prior.requestId, cloudDecision.decision);
+              return buildCloudPolicyDecisionResponse(cloudDecision, prior.requestId, fpData.originOnly);
             }
           }
         }
@@ -335,7 +452,7 @@ export async function verifyDestination(input, options = {}) {
         redirect: "error",
         cache: "no-store",
         referrerPolicy: "no-referrer",
-        signal: AbortSignal.timeout(12000)
+        signal: AbortSignal.timeout(2500)
       });
 
       const parsed = await response.json().catch(() => null);
@@ -399,11 +516,41 @@ export async function verifyDestination(input, options = {}) {
 
   // Stage 4: Sync redacted verification verdict to SafeGate Cloud Platform when configured.
   if (cloudConfigured) {
-    const cloudSync = await syncVerificationToCloud(input, enrichedResult);
-    enrichedResult = {
-      ...enrichedResult,
-      cloudSync
-    };
+    if (backgroundCloudSync) {
+      const cloudSyncPromise = syncVerificationToCloud(input, enrichedResult)
+        .then((syncRes) => {
+          enrichedResult.cloudSync = syncRes;
+          if (typeof options.onCloudSync === "function") {
+            options.onCloudSync(syncRes, enrichedResult);
+          }
+          return syncRes;
+        })
+        .catch(() => {
+          const failRes = { synced: false, configured: true, errorCode: "CLOUD_UNREACHABLE" };
+          enrichedResult.cloudSync = failRes;
+          if (typeof options.onCloudSync === "function") {
+            options.onCloudSync(failRes, enrichedResult);
+          }
+          return failRes;
+        });
+
+      enrichedResult = {
+        ...enrichedResult,
+        cloudSync: {
+          synced: false,
+          pending: true,
+          configured: true,
+          requestId: finalRequestId
+        },
+        _cloudSyncPromise: cloudSyncPromise
+      };
+    } else {
+      const cloudSync = await syncVerificationToCloud(input, enrichedResult);
+      enrichedResult = {
+        ...enrichedResult,
+        cloudSync
+      };
+    }
   }
 
   return enrichedResult;
@@ -418,12 +565,17 @@ export async function checkCloudOverrideForRequest({ rawUrl, requestId, lastResu
     return { checked: false, configured: false };
   }
 
+  // Wait for any in-flight background upload from instant verification before polling status.
+  if (lastResult?._cloudSyncPromise) {
+    await lastResult._cloudSyncPromise.catch(() => null);
+  }
+
   // If the original verification hasn't reached the cloud yet, retry upload first.
   if (lastResult && lastResult.cloudSync && !lastResult.cloudSync.synced && rawUrl) {
     await syncVerificationToCloud(rawUrl, lastResult).catch(() => null);
   }
 
-  const decision = await fetchCloudDecisionByRequestId(requestId);
+  const decision = await fetchCloudDecisionByRequestId(requestId, { timeoutMs: 3500 });
   if (!decision?.found) {
     return {
       checked: false,
@@ -442,19 +594,26 @@ export async function checkCloudOverrideForRequest({ rawUrl, requestId, lastResu
     }
   }
 
+  const normalizedDecision = String(decision.decision || "HOLD").toUpperCase();
+
   if (decision.allowOpen) {
     if (fpData?.fingerprint) {
       await removeBlockedUrl(fpData.fingerprint).catch(() => {});
-      rememberRequestForFingerprint(fpData.fingerprint, requestId, decision.decision);
+      rememberRequestForFingerprint(fpData.fingerprint, requestId, normalizedDecision);
     }
     return {
       checked: true,
       configured: true,
       blocked: false,
       allowOpen: true,
-      decision: decision.decision,
+      suspicious: false,
+      hold: false,
+      overrideActive: Boolean(decision.overrideActive),
+      decision: normalizedDecision,
       recommendedAction: decision.recommendedAction,
-      status: decision.status
+      status: decision.status,
+      score: decision.score ?? null,
+      reasons: decision.reasons || []
     };
   }
 
@@ -463,7 +622,10 @@ export async function checkCloudOverrideForRequest({ rawUrl, requestId, lastResu
       await persistBlockedUrl(fpData.fingerprint, {
         requestId,
         originHost: fpData.originOnly,
-        reasonCodes: ["CLOUD_OPERATOR_BLOCKED"],
+        reasonCodes:
+          Array.isArray(decision.reasons) && decision.reasons.length > 0
+            ? decision.reasons
+            : ["CLOUD_OPERATOR_BLOCKED"],
         source: "CLOUD_OPERATOR_OVERRIDE",
         threatType: "CLOUD_BLOCK"
       }).catch(() => {});
@@ -474,10 +636,24 @@ export async function checkCloudOverrideForRequest({ rawUrl, requestId, lastResu
       configured: true,
       blocked: true,
       allowOpen: false,
-      decision: decision.decision,
+      suspicious: false,
+      hold: false,
+      overrideActive: Boolean(decision.overrideActive),
+      decision: normalizedDecision,
       recommendedAction: decision.recommendedAction,
-      status: decision.status
+      status: decision.status,
+      score: decision.score ?? 100,
+      reasons: decision.reasons || []
     };
+  }
+
+  const isSuspicious =
+    normalizedDecision === "SUSPICIOUS" || decision.recommendedAction === "WARN_USER";
+
+  if (fpData?.fingerprint) {
+    // If downgraded from BLOCK -> SUSPICIOUS or HOLD, remove from hard block vault.
+    await removeBlockedUrl(fpData.fingerprint).catch(() => {});
+    rememberRequestForFingerprint(fpData.fingerprint, requestId, normalizedDecision);
   }
 
   return {
@@ -485,9 +661,14 @@ export async function checkCloudOverrideForRequest({ rawUrl, requestId, lastResu
     configured: true,
     blocked: false,
     allowOpen: false,
-    decision: decision.decision,
+    suspicious: isSuspicious,
+    hold: !isSuspicious,
+    overrideActive: Boolean(decision.overrideActive),
+    decision: normalizedDecision,
     recommendedAction: decision.recommendedAction,
-    status: decision.status
+    status: decision.status,
+    score: decision.score ?? null,
+    reasons: decision.reasons || []
   };
 }
 

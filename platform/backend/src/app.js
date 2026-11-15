@@ -1733,7 +1733,7 @@ function createApp({
       }
 
       const row = db.prepare(`
-        SELECT request_id, device_id, decision, recommended_action, status, updated_at
+        SELECT request_id, device_id, decision, recommended_action, status, score, reasons_json, created_at, updated_at
         FROM security_events
         WHERE request_id = ? AND device_id = ?
       `).get(requestId, deviceId);
@@ -1760,6 +1760,11 @@ function createApp({
           recommendedAction === 'ALLOW_WITH_CAUTION'
         );
 
+      const wasUpdatedByOperator =
+        Boolean(row.updated_at && row.created_at && row.updated_at !== row.created_at);
+
+      const parsedReasons = row.reasons_json ? parseJsonSafely(row.reasons_json, []) : [];
+
       return res.status(200).json({
         requestId: row.request_id,
         status,
@@ -1767,7 +1772,9 @@ function createApp({
         recommendedAction,
         blocked,
         allowOpen,
-        overrideActive: status !== 'OPEN' || allowOpen,
+        overrideActive: wasUpdatedByOperator || status !== 'OPEN' || allowOpen,
+        score: Number.isInteger(row.score) ? row.score : null,
+        reasons: Array.isArray(parsedReasons) ? parsedReasons : [],
         updatedAt: row.updated_at
       });
     } catch (error) {

@@ -17,6 +17,8 @@ export function isValidExternalHttpUrl(rawUrl) {
   }
 }
 
+let cachedNativeDeviceInfo = undefined;
+
 export async function openInExternalBrowser(targetUrl) {
   const url = String(targetUrl || "").trim();
   if (!isValidExternalHttpUrl(url)) {
@@ -34,8 +36,8 @@ export async function openInExternalBrowser(targetUrl) {
         });
         return { opened: true, packageName: "custom-tab-fallback" };
       } catch {
-        window.location.assign(url);
-        return { opened: true, packageName: "webview-fallback" };
+        // Security invariant: never load an external untrusted URL inside SafeGate's privileged WebView.
+        throw new Error("NO_EXTERNAL_BROWSER_AVAILABLE");
       }
     }
   }
@@ -48,17 +50,22 @@ export async function getNativeHardwareDeviceInfo() {
   if (!Capacitor.isNativePlatform()) {
     return null;
   }
+  if (cachedNativeDeviceInfo !== undefined) {
+    return cachedNativeDeviceInfo;
+  }
   try {
     const info = await ExternalBrowser.getDeviceInfo();
     if (info && typeof info.deviceName === "string" && info.deviceName.trim()) {
-      return {
+      cachedNativeDeviceInfo = {
         deviceName: info.deviceName.trim(),
         manufacturer: info.manufacturer || "",
         model: info.model || ""
       };
+      return cachedNativeDeviceInfo;
     }
   } catch {
     // Ignore native plugin fallback errors
   }
+  cachedNativeDeviceInfo = null;
   return null;
 }

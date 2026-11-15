@@ -268,7 +268,6 @@ async function persistIndexedBlock(fingerprint, details = {}) {
       : ["SECURITY_BLOCK"],
     source: details.source || "SAFEGATE",
     threatType: details.threatType || null,
-    originHost: details.originHost || null,
     requestId: details.requestId || "UNKNOWN",
     createdAt: new Date().toISOString()
   };

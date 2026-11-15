@@ -48,9 +48,11 @@ export default function App() {
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [busyRequestId, setBusyRequestId] = useState(null);
 
-  const loadAllEvents = useCallback(async () => {
-    setEventsLoading(true);
-    setEventsError('');
+  const loadAllEvents = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setEventsLoading(true);
+      setEventsError('');
+    }
     try {
       const collected = [];
       let offset = 0;
@@ -69,11 +71,13 @@ export default function App() {
         setSession(null);
         setEvents([]);
         setSelectedEventId(null);
-      } else {
+      } else if (!silent) {
         setEventsError(err?.message || 'Could not load security events.');
       }
     } finally {
-      setEventsLoading(false);
+      if (!silent) {
+        setEventsLoading(false);
+      }
     }
   }, []);
 
@@ -97,9 +101,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (session?.authenticated) {
-      loadAllEvents();
-    }
+    if (!session?.authenticated) return undefined;
+    loadAllEvents();
+
+    const intervalId = window.setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        loadAllEvents({ silent: true });
+      }
+    }, 10000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadAllEvents({ silent: true });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [session?.authenticated, loadAllEvents]);
 
   const handleLogin = async ({ username, password }) => {

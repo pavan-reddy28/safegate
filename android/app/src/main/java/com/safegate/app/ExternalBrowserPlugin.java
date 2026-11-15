@@ -185,8 +185,19 @@ public class ExternalBrowserPlugin extends Plugin {
         return candidates.get(0);
     }
 
+    private JSObject cachedDeviceInfo = null;
+
     @PluginMethod
     public void getDeviceInfo(PluginCall call) {
+        if (cachedDeviceInfo != null) {
+            JSObject copy = new JSObject();
+            copy.put("deviceName", cachedDeviceInfo.getString("deviceName"));
+            copy.put("manufacturer", cachedDeviceInfo.getString("manufacturer"));
+            copy.put("model", cachedDeviceInfo.getString("model"));
+            call.resolve(copy);
+            return;
+        }
+
         String manufacturer = safeText(Build.MANUFACTURER);
         String brand = safeText(Build.BRAND);
         String model = safeText(Build.MODEL);
@@ -198,7 +209,13 @@ public class ExternalBrowserPlugin extends Plugin {
         result.put("deviceName", deviceName);
         result.put("manufacturer", manufacturer);
         result.put("model", model);
-        call.resolve(result);
+        cachedDeviceInfo = result;
+
+        JSObject copy = new JSObject();
+        copy.put("deviceName", deviceName);
+        copy.put("manufacturer", manufacturer);
+        copy.put("model", model);
+        call.resolve(copy);
     }
 
     private String readHardwareMarketName() {

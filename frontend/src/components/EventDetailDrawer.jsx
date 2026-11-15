@@ -80,7 +80,7 @@ export function EventDetailDrawer({
       setDecision(nextDecision);
       setStatus(nextStatus);
       setRecommendedAction(nextAction);
-      setFeedback(`Updated to ${nextDecision} (${nextStatus}).`);
+      setFeedback(`Updated to ${nextDecision} (${nextStatus}) — active on device sync.`);
     } catch (err) {
       setErrorMsg(err?.message || 'Failed to update verdict.');
     } finally {
@@ -105,7 +105,7 @@ export function EventDetailDrawer({
         updates.deviceName = deviceName.trim();
       }
       await onPatchEvent(event.requestId, updates);
-      setFeedback('Changes saved to SafeGate database.');
+      setFeedback('Changes saved — active on device policy sync.');
     } catch (err) {
       setErrorMsg(err?.message || 'Failed to save changes.');
     } finally {

@@ -169,19 +169,37 @@ export async function resolveDeviceName(overrides = {}) {
   return detected;
 }
 
+const MAX_REQUEST_MAP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isValidSha256Fingerprint(fp) {
+  return typeof fp === "string" && /^[a-f0-9]{64}$/i.test(fp);
+}
+
 export function rememberRequestForFingerprint(fingerprint, requestId, decision) {
-  if (!fingerprint || !requestId) return;
+  if (!isValidSha256Fingerprint(fingerprint) || !requestId) return;
+  const now = Date.now();
   const entry = {
     requestId: String(requestId),
     decision: String(decision || "HOLD").toUpperCase(),
-    updatedAt: Date.now()
+    updatedAt: now
   };
   memoryRequestMap.set(fingerprint, entry);
 
   try {
     const raw = globalThis.localStorage?.getItem(STORAGE_REQUEST_MAP_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    const next = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    const next = {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (
+          isValidSha256Fingerprint(k) &&
+          v?.requestId &&
+          now - Number(v.updatedAt || 0) <= MAX_REQUEST_MAP_TTL_MS
+        ) {
+          next[k] = v;
+        }
+      }
+    }
     next[fingerprint] = entry;
 
     const keys = Object.keys(next);
@@ -198,9 +216,14 @@ export function rememberRequestForFingerprint(fingerprint, requestId, decision) 
 }
 
 export function lookupRequestForFingerprint(fingerprint) {
-  if (!fingerprint) return null;
+  if (!isValidSha256Fingerprint(fingerprint)) return null;
+  const now = Date.now();
   if (memoryRequestMap.has(fingerprint)) {
-    return memoryRequestMap.get(fingerprint);
+    const cached = memoryRequestMap.get(fingerprint);
+    if (now - Number(cached?.updatedAt || 0) <= MAX_REQUEST_MAP_TTL_MS) {
+      return cached;
+    }
+    memoryRequestMap.delete(fingerprint);
   }
 
   try {
@@ -208,7 +231,7 @@ export function lookupRequestForFingerprint(fingerprint) {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     const entry = parsed?.[fingerprint];
-    if (entry?.requestId) {
+    if (entry?.requestId && now - Number(entry.updatedAt || 0) <= MAX_REQUEST_MAP_TTL_MS) {
       memoryRequestMap.set(fingerprint, entry);
       return entry;
     }
@@ -496,6 +519,94 @@ export async function createSignedProofToken(
   return `${signedInput}.${bytesToBase64Url(signatureBytes)}`;
 }
 
+export function extractPrivateUrlTokens(rawUrl) {
+  const privateTokens = [];
+  if (typeof rawUrl !== "string") return privateTokens;
+
+  let parsed;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    const trimmed = rawUrl.trim();
+    if (trimmed.length > 8) privateTokens.push(trimmed);
+    return privateTokens;
+  }
+
+  if (parsed.pathname && parsed.pathname !== "/" && parsed.pathname.length > 2) {
+    privateTokens.push(parsed.pathname);
+    try {
+      const decPath = decodeURIComponent(parsed.pathname);
+      if (decPath.length > 2) privateTokens.push(decPath);
+    } catch {
+      // ignore malformed encoding
+    }
+    for (const seg of parsed.pathname.split("/").filter(Boolean)) {
+      if (seg.length >= 5) {
+        privateTokens.push(seg);
+        try {
+          const decSeg = decodeURIComponent(seg);
+          if (decSeg.length >= 5) privateTokens.push(decSeg);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  if (parsed.search && parsed.search.length > 1) {
+    privateTokens.push(parsed.search);
+    for (const [, value] of parsed.searchParams.entries()) {
+      if (value && value.length >= 4) {
+        privateTokens.push(value);
+        try {
+          const decVal = decodeURIComponent(value);
+          if (decVal.length >= 4) privateTokens.push(decVal);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  if (parsed.hash && parsed.hash.length > 1) {
+    privateTokens.push(parsed.hash);
+    if (parsed.hash.slice(1).length >= 4) {
+      privateTokens.push(parsed.hash.slice(1));
+    }
+  }
+
+  if (parsed.username && parsed.username.length >= 2) privateTokens.push(parsed.username);
+  if (parsed.password && parsed.password.length >= 2) privateTokens.push(parsed.password);
+
+  return [...new Set(privateTokens)].filter(Boolean);
+}
+
+export function verifyNoPrivateUrlLeak(rawUrl, payload) {
+  let serialized;
+  try {
+    serialized = JSON.stringify(payload);
+  } catch {
+    return false;
+  }
+
+  if (
+    /\?(?:[^=&\s"']+=[^&\s"']*)/.test(serialized) ||
+    /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(serialized) ||
+    /https?:\/\/[^/\s"']+\/[^\s"']*/i.test(serialized)
+  ) {
+    return false;
+  }
+
+  const privateTokens = extractPrivateUrlTokens(rawUrl);
+  for (const token of privateTokens) {
+    if (serialized.includes(token)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export async function syncVerificationToCloud(rawUrl, result, overrides = {}) {
   const cfg = getCloudConfig(overrides);
   if (!cfg.platformUrl || cfg.appIngestKey.length < 32 || cfg.proofSecret.length < 32) {
@@ -508,7 +619,14 @@ export async function syncVerificationToCloud(rawUrl, result, overrides = {}) {
 
   const deviceId = overrides.deviceId || getOrCreateDeviceId();
   const deviceName = await resolveDeviceName(overrides);
-  const payload = buildPrivacySafeCloudPayload(result, deviceId, deviceName);
+  const payload = overrides.payloadOverride || buildPrivacySafeCloudPayload(result, deviceId, deviceName);
+
+  // Strict zero-leakage gate: block egress before calling fetch if any path/query/fragment/PII appears.
+  if (!verifyNoPrivateUrlLeak(rawUrl, payload)) {
+    return { synced: false, configured: true, errorCode: "PRIVACY_LEAK_BLOCKED" };
+  }
+
+  const timeoutMs = Number.isFinite(overrides.timeoutMs) ? overrides.timeoutMs : 5000;
 
   try {
     const verificationToken = await createSignedProofToken(
@@ -539,7 +657,8 @@ export async function syncVerificationToCloud(rawUrl, result, overrides = {}) {
       credentials: "omit",
       cache: "no-store",
       referrerPolicy: "no-referrer",
-      signal: AbortSignal.timeout(8000)
+      keepalive: true,
+      signal: AbortSignal.timeout(timeoutMs)
     });
 
     const parsed = await response.json().catch(() => null);
@@ -576,6 +695,7 @@ export async function fetchCloudDecisionByRequestId(requestId, overrides = {}) {
   }
 
   const deviceId = overrides.deviceId || getOrCreateDeviceId();
+  const timeoutMs = Number.isFinite(overrides.timeoutMs) ? overrides.timeoutMs : 3500;
 
   try {
     const response = await fetch(
@@ -590,7 +710,7 @@ export async function fetchCloudDecisionByRequestId(requestId, overrides = {}) {
         credentials: "omit",
         cache: "no-store",
         referrerPolicy: "no-referrer",
-        signal: AbortSignal.timeout(8000)
+        signal: AbortSignal.timeout(timeoutMs)
       }
     );
 
@@ -614,6 +734,8 @@ export async function fetchCloudDecisionByRequestId(requestId, overrides = {}) {
       blocked: Boolean(parsed.blocked),
       allowOpen: Boolean(parsed.allowOpen),
       overrideActive: Boolean(parsed.overrideActive),
+      score: Number.isInteger(parsed.score) ? parsed.score : null,
+      reasons: Array.isArray(parsed.reasons) ? parsed.reasons : [],
       updatedAt: parsed.updatedAt || null
     };
   } catch {

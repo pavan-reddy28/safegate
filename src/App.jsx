@@ -12,7 +12,8 @@ import {
 import { UrlLockerIcon } from "./components/UrlLockerIcon.jsx";
 import {
   verifyDestination,
-  checkCloudOverrideForRequest
+  checkCloudOverrideForRequest,
+  warmupVerificationEngine
 } from "./security/verificationService.js";
 import {
   isValidExternalHttpUrl,
@@ -288,9 +289,25 @@ export function App() {
   const destinationRef = useRef("");
   const lastResultRef = useRef(null);
   const processingRef = useRef(false);
+  const syncingCloudRef = useRef(false);
+  const phaseRef = useRef(phase);
+  const requestIdRef = useRef(requestId);
   const lastUrlRef = useRef("");
   const lastReceivedAtRef = useRef(0);
   const mountedRef = useRef(true);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    requestIdRef.current = requestId;
+  }, [requestId]);
+
+  // Pre-warm encrypted SQLite vault and cached hardware identity on startup so first link scan is instant.
+  useEffect(() => {
+    warmupVerificationEngine();
+  }, []);
 
   useEffect(() => {
     if (phase !== "checking" && phase !== "opening") return undefined;
@@ -317,6 +334,94 @@ export function App() {
     }
   }, []);
 
+  const applyCloudDecision = useCallback(
+    async (decision, { isManual = false, activeRequestId = requestIdRef.current } = {}) => {
+      if (!mountedRef.current || requestIdRef.current !== activeRequestId) {
+        return;
+      }
+
+      const currentPhase = phaseRef.current;
+
+      if (decision.allowOpen) {
+        if (currentPhase === "safe") {
+          if (isManual) setCloudNotice("Confirmed: Approved");
+          return;
+        }
+        setHeadline("Approved by operator. Handed off to your browser.");
+        setCloudNotice("Status synced: Approved by operator");
+        setPhase("opening");
+        await openDestinationDirectly(destinationRef.current);
+        if (mountedRef.current && requestIdRef.current === activeRequestId) {
+          setPhase("safe");
+        }
+        return;
+      }
+
+      if (decision.blocked) {
+        if (currentPhase !== "blocked") {
+          setHeadline("Dangerous link blocked by security policy.");
+          setCloudNotice("Status synced: Blocked by operator");
+          setPhase("blocked");
+        } else if (isManual) {
+          setCloudNotice("Still blocked");
+        }
+        return;
+      }
+
+      const decisionName = String(decision.decision || "").toUpperCase();
+      if (decision.suspicious || decisionName === "SUSPICIOUS") {
+        if (currentPhase !== "suspicious") {
+          setHeadline("Flagged as suspicious by security policy.");
+          setCloudNotice("Status synced: Marked Suspicious");
+          setPhase("suspicious");
+        } else if (isManual) {
+          setCloudNotice("Confirmed: Suspicious");
+        }
+        return;
+      }
+
+      if (decision.hold || decisionName === "HOLD") {
+        let resolvedHost =
+          displayHost ||
+          lastResultRef.current?.localVerification?.redactedDestination?.displayHost ||
+          lastResultRef.current?.localVerification?.destination?.hostname ||
+          "";
+        if (!resolvedHost && destinationRef.current) {
+          try {
+            resolvedHost = new URL(destinationRef.current).hostname;
+          } catch {
+            resolvedHost = "";
+          }
+        }
+        if (resolvedHost && !displayHost) {
+          setDisplayHost(resolvedHost);
+        }
+        setHoldChecksPassed(
+          lastResultRef.current?.verificationStatus === "COMPLETED" || Boolean(resolvedHost)
+        );
+        if (currentPhase !== "hold") {
+          setHeadline("Placed on hold by security policy.");
+          setCloudNotice("Status synced: Placed on Hold");
+          setPhase("hold");
+        } else if (isManual) {
+          setCloudNotice("Confirmed: On Hold");
+        }
+        return;
+      }
+
+      if (isManual) {
+        if (decision.configured === false) {
+          setCloudNotice("Cloud check not configured");
+        } else if (decision.offline) {
+          setCloudNotice("Could not reach cloud status");
+        } else {
+          setCloudNotice("No override update yet");
+        }
+      }
+    },
+    [displayHost, openDestinationDirectly]
+  );
+
   const handleIncomingUrl = useCallback(
     async (rawUrl) => {
       const url = String(rawUrl || "").trim();
@@ -333,6 +438,7 @@ export function App() {
       const localId = createFallbackRequestId();
       destinationRef.current = url;
       lastResultRef.current = null;
+      requestIdRef.current = localId;
       setRequestId(localId);
       setHeadline("");
       setHoldChecksPassed(false);
@@ -350,11 +456,21 @@ export function App() {
       setPhase("checking");
 
       try {
-        const result = await verifyDestination(url);
+        const result = await verifyDestination(url, {
+          backgroundCloudSync: true,
+          onCloudSync: (syncRes) => {
+            if (!mountedRef.current) return;
+            if (syncRes?.synced && lastResultRef.current) {
+              lastResultRef.current = { ...lastResultRef.current, cloudSync: syncRes };
+            }
+          }
+        });
         if (!mountedRef.current) return;
 
+        const resolvedRequestId = getRequestId(result, localId);
         lastResultRef.current = result;
-        setRequestId(getRequestId(result, localId));
+        requestIdRef.current = resolvedRequestId;
+        setRequestId(resolvedRequestId);
         setHeadline(result?.riskSummary?.headline || "");
         setDisplayHost(
           result?.localVerification?.redactedDestination?.displayHost || ""
@@ -391,53 +507,85 @@ export function App() {
     [openDestinationDirectly]
   );
 
-  const handleCheckCloudStatus = useCallback(async () => {
-    if (!requestId || checkingCloud || processingRef.current) return;
+  const runCloudStatusSync = useCallback(
+    async ({ manual = false } = {}) => {
+      const activeId = requestIdRef.current;
+      if (!activeId || processingRef.current || syncingCloudRef.current) return;
+      if (!["blocked", "suspicious", "hold", "safe"].includes(phaseRef.current)) return;
 
-    setCheckingCloud(true);
-    setCloudNotice("");
+      syncingCloudRef.current = true;
+      if (manual) {
+        setCheckingCloud(true);
+        setCloudNotice("");
+      }
 
-    try {
-      const decision = await checkCloudOverrideForRequest({
-        rawUrl: destinationRef.current,
-        requestId,
-        lastResult: lastResultRef.current
-      });
-      if (!mountedRef.current) return;
+      try {
+        const decision = await checkCloudOverrideForRequest({
+          rawUrl: destinationRef.current,
+          requestId: activeId,
+          lastResult: lastResultRef.current
+        });
+        if (!mountedRef.current || requestIdRef.current !== activeId) return;
 
-      if (decision.allowOpen) {
-        setHeadline("Approved by operator. Handed off to your browser.");
-        setPhase("opening");
-        await openDestinationDirectly(destinationRef.current);
-        if (mountedRef.current) {
-          setPhase("safe");
+        if (!decision.checked && !manual) {
+          return;
         }
-        return;
+        await applyCloudDecision(decision, { isManual: manual, activeRequestId: activeId });
+      } catch {
+        if (mountedRef.current && manual && requestIdRef.current === activeId) {
+          setCloudNotice("Could not reach cloud status");
+        }
+      } finally {
+        syncingCloudRef.current = false;
+        if (mountedRef.current && manual) {
+          setCheckingCloud(false);
+        }
       }
+    },
+    [applyCloudDecision]
+  );
 
-      if (decision.blocked) {
-        setPhase("blocked");
-        setCloudNotice("Still blocked");
-        return;
-      }
+  const handleCheckCloudStatus = useCallback(async () => {
+    await runCloudStatusSync({ manual: true });
+  }, [runCloudStatusSync]);
 
-      if (decision.configured === false) {
-        setCloudNotice("Cloud check not configured");
-      } else if (decision.offline) {
-        setCloudNotice("Could not reach cloud status");
-      } else {
-        setCloudNotice("No override update yet");
-      }
-    } catch {
-      if (mountedRef.current) {
-        setCloudNotice("Could not reach cloud status");
-      }
-    } finally {
-      if (mountedRef.current) {
-        setCheckingCloud(false);
-      }
+  // Automatic two-way live policy sync while a verification result screen is visible.
+  useEffect(() => {
+    if (!requestId || !["blocked", "suspicious", "hold", "safe"].includes(phase)) {
+      return undefined;
     }
-  }, [requestId, checkingCloud, openDestinationDirectly]);
+
+    const intervalId = window.setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        runCloudStatusSync({ manual: false });
+      }
+    }, 2500);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        runCloudStatusSync({ manual: false });
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    let appStateListener;
+    if (isNative) {
+      CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+        if (isActive) {
+          runCloudStatusSync({ manual: false });
+        }
+      }).then((listener) => {
+        appStateListener = listener;
+        if (!mountedRef.current) listener.remove();
+      });
+    }
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      appStateListener?.remove();
+    };
+  }, [phase, requestId, runCloudStatusSync]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -494,6 +642,7 @@ export function App() {
     destinationRef.current = "";
     lastResultRef.current = null;
     lastUrlRef.current = "";
+    requestIdRef.current = "";
     setRequestId("");
     setHeadline("");
     setHoldChecksPassed(false);
@@ -609,6 +758,11 @@ export function App() {
                 </p>
               </div>
               <RequestIdBadge value={requestId} />
+              {cloudNotice && (
+                <p data-testid="cloud-status-notice" className="text-xs font-medium text-slate-400">
+                  {cloudNotice}
+                </p>
+              )}
               <button
                 type="button"
                 onClick={resetToReady}

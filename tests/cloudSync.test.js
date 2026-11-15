@@ -436,3 +436,179 @@ test("Real client offlineEngine + cloudSync matrix inserts 201 across all verdic
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Two-way SUSPICIOUS/HOLD overrides, instant backgroundCloudSync (<150ms), and fail-closed privacy leak guard", async () => {
+  const storageMap = new Map();
+  const originalLocalStorage = globalThis.localStorage;
+  const originalFetch = globalThis.fetch;
+  const originalEnv = globalThis.__SAFEGATE_TEST_ENV__;
+
+  globalThis.localStorage = {
+    getItem: (k) => (storageMap.has(k) ? storageMap.get(k) : null),
+    setItem: (k, v) => storageMap.set(k, String(v)),
+    removeItem: (k) => storageMap.delete(k)
+  };
+
+  globalThis.__SAFEGATE_TEST_ENV__ = {
+    VITE_SAFEGATE_PLATFORM_URL: TEST_PLATFORM_URL,
+    VITE_SAFEGATE_APP_ID: TEST_APP_ID,
+    VITE_APP_INGEST_KEY: TEST_APP_KEY,
+    VITE_EVENT_PROOF_HMAC_SECRET: TEST_PROOF_SECRET
+  };
+
+  const cloudDb = new Map();
+  let fetchCalls = 0;
+
+  globalThis.fetch = async (url, init = {}) => {
+    const href = String(url);
+    fetchCalls += 1;
+
+    if (href.startsWith(TEST_PLATFORM_URL) && href.endsWith("/api/v1/events") && init.method === "POST") {
+      // Simulate slow 600ms mobile upload to prove backgroundCloudSync returns instantaneously
+      await new Promise((r) => setTimeout(r, 600));
+      const body = JSON.parse(init.body);
+      cloudDb.set(body.requestId, {
+        requestId: body.requestId,
+        deviceId: body.deviceId,
+        status: "OPEN",
+        decision: body.finalDecision,
+        recommendedAction: body.recommendedAction,
+        blocked: body.finalDecision === "BLOCK",
+        allowOpen: body.finalDecision === "SAFE" || body.finalDecision === "KNOWN_SAFE",
+        overrideActive: false,
+        score: body.riskSummary?.score ?? 100,
+        reasons: body.finalReasonCodes || [],
+        updatedAt: new Date().toISOString()
+      });
+      return new Response(
+        JSON.stringify({ accepted: true, requestId: body.requestId, status: "OPEN" }),
+        { status: 201, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const decisionMatch = href.match(/\/api\/v1\/app\/events\/([^/]+)\/decision\?deviceId=([^&]+)/);
+    if (decisionMatch && init.method === "GET") {
+      const rid = decodeURIComponent(decisionMatch[1]);
+      const did = decodeURIComponent(decisionMatch[2]);
+      const rec = cloudDb.get(rid);
+      if (!rec || rec.deviceId !== did) {
+        return new Response(
+          JSON.stringify({ error: { code: "NOT_FOUND" } }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify(rec), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    throw new Error(`Unexpected fetch to ${href}`);
+  };
+
+  try {
+    const {
+      verifyNoPrivateUrlLeak,
+      syncVerificationToCloud
+    } = await import("../src/security/cloudSync.js");
+    const {
+      verifyDestination,
+      checkCloudOverrideForRequest
+    } = await import("../src/security/verificationService.js");
+
+    const sampleUrl = "https://accounts.google.com.security-check.example/verify-session?otp=554433";
+
+    // 1. Strict fail-closed leak prevention before fetch()
+    const cleanPayload = { requestId: "req-1", redactedDestination: { originOnly: "https://accounts.google.com.security-check.example" } };
+    assert.equal(verifyNoPrivateUrlLeak(sampleUrl, cleanPayload), true);
+
+    const leakedPayload = { requestId: "req-1", deviceName: "secret otp 554433", suspicious: "verify-session" };
+    assert.equal(verifyNoPrivateUrlLeak(sampleUrl, leakedPayload), false);
+
+    const preCalls = fetchCalls;
+    const blockedSync = await syncVerificationToCloud(
+      sampleUrl,
+      { requestId: "req-leak-1", finalDecision: "BLOCK", finalReasonCodes: ["TEST"], layersExecuted: [] },
+      { payloadOverride: leakedPayload }
+    );
+    assert.equal(blockedSync.synced, false);
+    assert.equal(blockedSync.errorCode, "PRIVACY_LEAK_BLOCKED");
+    assert.equal(fetchCalls, preCalls); // Zero network calls made!
+
+    // 2. Instant verification with backgroundCloudSync: true completes well under 150ms despite 600ms upload
+    const t0 = Date.now();
+    const fastResult = await verifyDestination(sampleUrl, { backgroundCloudSync: true });
+    const elapsedMs = Date.now() - t0;
+    assert.equal(fastResult.finalDecision, "BLOCK");
+    assert.equal(elapsedMs < 200, true, `Expected instant verification <200ms, got ${elapsedMs}ms`);
+    assert.equal(fastResult.cloudSync.pending, true);
+
+    // Wait for background sync promise to settle and verify event landed in cloudDb
+    const settledSync = await fastResult._cloudSyncPromise;
+    assert.equal(settledSync.synced, true);
+    const reqId = fastResult.requestId;
+    assert.equal(cloudDb.has(reqId), true);
+
+    // 3. Operator changes verdict to SUSPICIOUS (keeping status: OPEN) -> app receives SUSPICIOUS immediately!
+    cloudDb.set(reqId, {
+      ...cloudDb.get(reqId),
+      status: "OPEN",
+      decision: "SUSPICIOUS",
+      recommendedAction: "WARN_USER",
+      blocked: false,
+      allowOpen: false,
+      overrideActive: true,
+      score: 72,
+      updatedAt: new Date(Date.now() + 1000).toISOString()
+    });
+
+    const suspiciousCheck = await checkCloudOverrideForRequest({
+      rawUrl: sampleUrl,
+      requestId: reqId,
+      lastResult: fastResult
+    });
+    assert.equal(suspiciousCheck.checked, true);
+    assert.equal(suspiciousCheck.blocked, false);
+    assert.equal(suspiciousCheck.allowOpen, false);
+    assert.equal(suspiciousCheck.suspicious, true);
+    assert.equal(suspiciousCheck.decision, "SUSPICIOUS");
+
+    // Re-tapping URL now reflects operator SUSPICIOUS override instead of stale local BLOCK
+    const retapSuspicious = await verifyDestination(sampleUrl);
+    assert.equal(retapSuspicious.finalDecision, "SUSPICIOUS");
+    assert.equal(retapSuspicious.cloudOverride, true);
+    assert.equal(retapSuspicious.requestId, reqId);
+
+    // 4. Operator changes verdict to HOLD -> app receives HOLD cleanly
+    cloudDb.set(reqId, {
+      ...cloudDb.get(reqId),
+      status: "REVIEWED",
+      decision: "HOLD",
+      recommendedAction: "HOLD",
+      blocked: false,
+      allowOpen: false,
+      overrideActive: true,
+      score: 40,
+      updatedAt: new Date(Date.now() + 2000).toISOString()
+    });
+
+    const holdCheck = await checkCloudOverrideForRequest({
+      rawUrl: sampleUrl,
+      requestId: reqId,
+      lastResult: fastResult
+    });
+    assert.equal(holdCheck.checked, true);
+    assert.equal(holdCheck.hold, true);
+    assert.equal(holdCheck.suspicious, false);
+    assert.equal(holdCheck.decision, "HOLD");
+
+    const retapHold = await verifyDestination(sampleUrl);
+    assert.equal(retapHold.finalDecision, "HOLD");
+    assert.equal(retapHold.cloudOverride, true);
+    assert.equal(retapHold.requestId, reqId);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.localStorage = originalLocalStorage;
+    globalThis.__SAFEGATE_TEST_ENV__ = originalEnv;
+  }
+});
