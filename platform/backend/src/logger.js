@@ -37,7 +37,7 @@ const LEVELS = Object.freeze({
 // Sensitive information must never enter application logs.
 
 
-const SENSITIVE_KEYS =  /authorization|access.?token|api.?key|api.?token|password|passwd|secret|cookie|raw.?url|full.?url|^url$|domain|fingerprint|hash|request.?body|response.?body|payload|client.?id|device.?id|tenant.?id|credential|token.?value/i;
+const SENSITIVE_KEYS = /authorization|access.?token|api.?key|api.?token|verification.?token|proof|private.?key|hmac|password|passwd|secret|cookie|raw.?url|full.?url|^url$|domain|destination.?host|registrable.?domain|fingerprint|hash|request.?body|response.?body|payload|client.?id|device.?id|tenant.?id|credential|token.?value/i;
 
 
 

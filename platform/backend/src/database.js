@@ -1,9 +1,126 @@
-
 'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
 const Database = require('better-sqlite3');
+
+const V2_EVENTS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS security_events (
+    request_id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    event_time TEXT NOT NULL,
+    decision TEXT NOT NULL
+      CHECK(decision IN ('BLOCK', 'SUSPICIOUS', 'HOLD', 'SAFE', 'KNOWN_SAFE', 'NO_KNOWN_THREAT')),
+    score INTEGER NOT NULL
+      CHECK(score >= 0 AND score <= 100),
+    reasons_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'OPEN'
+      CHECK(status IN ('OPEN', 'REVIEWED', 'RESOLVED', 'ARCHIVED')),
+    verification_status TEXT NOT NULL DEFAULT 'COMPLETED'
+      CHECK(verification_status IN ('COMPLETED', 'INCOMPLETE')),
+    local_decision TEXT,
+    stage TEXT,
+    recommended_action TEXT,
+    destination_host TEXT,
+    registrable_domain TEXT,
+    protocol TEXT,
+    indicators_json TEXT NOT NULL DEFAULT '[]',
+    security_checks_json TEXT NOT NULL DEFAULT '{}',
+    url_inspection_json TEXT NOT NULL DEFAULT '{}',
+    risk_level TEXT,
+    layers_executed_count INTEGER NOT NULL DEFAULT 0,
+    zero_egress INTEGER NOT NULL DEFAULT 1,
+    proof_jti TEXT NOT NULL DEFAULT 'legacy',
+    payload_hash TEXT NOT NULL DEFAULT '',
+    app_version TEXT,
+    operator_notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`;
+
+function migrateSecurityEventsIfNeeded(db, logger) {
+  const columns = db.prepare('PRAGMA table_info(security_events)').all();
+  if (!columns || columns.length === 0) {
+    return;
+  }
+
+  const columnNames = new Set(columns.map(col => col.name));
+  const tableRow = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'security_events'")
+    .get();
+  const tableSql = String(tableRow?.sql || '');
+
+  const hasFullV2Schema =
+    columnNames.has('proof_jti') &&
+    columnNames.has('payload_hash') &&
+    columnNames.has('destination_host') &&
+    columnNames.has('security_checks_json') &&
+    columnNames.has('url_inspection_json') &&
+    columnNames.has('operator_notes') &&
+    tableSql.includes('KNOWN_SAFE');
+
+  if (hasFullV2Schema) {
+    return;
+  }
+
+  // Lightweight additive migration if only operator_notes is missing on an existing v2 table
+  if (
+    columnNames.has('proof_jti') &&
+    tableSql.includes('KNOWN_SAFE') &&
+    !columnNames.has('operator_notes')
+  ) {
+    logger.info('Adding operator_notes column to security_events');
+    db.exec('ALTER TABLE security_events ADD COLUMN operator_notes TEXT;');
+    return;
+  }
+
+  logger.info('Migrating security_events schema to v2');
+
+  const runMigration = db.transaction(() => {
+    db.exec('DROP TABLE IF EXISTS security_events_v2;');
+    db.exec(
+      V2_EVENTS_SCHEMA.replace('CREATE TABLE IF NOT EXISTS security_events', 'CREATE TABLE security_events_v2')
+    );
+
+    db.exec(`
+      INSERT INTO security_events_v2 (
+        request_id,
+        device_id,
+        event_time,
+        decision,
+        score,
+        reasons_json,
+        status,
+        verification_status,
+        proof_jti,
+        payload_hash,
+        created_at,
+        updated_at
+      )
+      SELECT
+        request_id,
+        device_id,
+        event_time,
+        decision,
+        score,
+        reasons_json,
+        status,
+        'COMPLETED',
+        'legacy-' || request_id,
+        '',
+        created_at,
+        updated_at
+      FROM security_events;
+    `);
+
+    db.exec('DROP TABLE security_events;');
+    db.exec('ALTER TABLE security_events_v2 RENAME TO security_events;');
+  });
+
+  runMigration();
+  logger.info('SQLite security_events migration completed');
+}
 
 function initializeDatabase(config, logger) {
   logger.info('SQLite initialization started');
@@ -28,20 +145,20 @@ function initializeDatabase(config, logger) {
       first_seen_at TEXT NOT NULL,
       last_seen_at TEXT NOT NULL
     );
+  `);
 
-    CREATE TABLE IF NOT EXISTS security_events (
-      request_id TEXT PRIMARY KEY,
+  migrateSecurityEventsIfNeeded(db, logger);
+
+  db.exec(`
+    ${V2_EVENTS_SCHEMA}
+
+    CREATE TABLE IF NOT EXISTS consumed_proof_tokens (
+      jti TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL,
       device_id TEXT NOT NULL,
-      event_time TEXT NOT NULL,
-      decision TEXT NOT NULL
-        CHECK(decision IN ('BLOCK', 'SUSPICIOUS', 'HOLD', 'SAFE')),
-      score INTEGER NOT NULL
-        CHECK(score >= 0 AND score <= 100),
-      reasons_json TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'OPEN'
-        CHECK(status IN ('OPEN', 'REVIEWED', 'RESOLVED', 'ARCHIVED')),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      payload_hash TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS admin_actions (
@@ -73,6 +190,12 @@ function initializeDatabase(config, logger) {
 
     CREATE INDEX IF NOT EXISTS idx_events_decision
       ON security_events(decision);
+
+    CREATE INDEX IF NOT EXISTS idx_events_domain
+      ON security_events(registrable_domain);
+
+    CREATE INDEX IF NOT EXISTS idx_proof_expires
+      ON consumed_proof_tokens(expires_at);
 
     CREATE INDEX IF NOT EXISTS idx_commands_device_status
       ON device_commands(device_id, status);
@@ -135,4 +258,3 @@ function initializeDatabase(config, logger) {
 }
 
 module.exports = { initializeDatabase };
-

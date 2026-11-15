@@ -1,292 +1,76 @@
-
-
 version: "3.8"
 
-
-
 services:
-
-
-
   platform:
-
-
-
-    image: safegate-platform:1.0.6
-
-
-
+    image: safegate-platform:1.1.0
     environment:
-
-
-
       NODE_ENV: production
-
-
-
       PORT: "4317"
-
-
-
       DB_PATH: /app/data/safegate.sqlite
-
-
-
       ENV_FILE: /run/secrets/platform_env
-
-
-
     secrets:
-
-
-
       - source: platform_env_v3
-
-
-
         target: platform_env
-
-
-
         uid: "1000"
-
-
-
         gid: "1000"
-
-
-
         mode: 0400
-
-
-
     volumes:
-
-
-
       - /home/pavanreddyserver/platform/data:/app/data
-
-
-
     networks:
-
-
-
       - safegate_private
-
-
-
       - safegate_azure_egress
-
-
-
     read_only: true
-
-
-
     tmpfs:
-
-
-
       - /tmp
-
-
-
     cap_drop:
-
-
-
       - ALL
-
-
-
     security_opt:
-
-
-
       - no-new-privileges:true
-
-
-
     healthcheck:
-
-
-
       test:
-
-
-
         - CMD
-
-
-
         - node
-
-
-
         - -e
-
-
-
         - "require('node:http').get('http://127.0.0.1:4317/ready', r => { r.resume(); process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"
-
-
-
       interval: 30s
-
-
-
       timeout: 5s
-
-
-
       retries: 3
-
-
-
       start_period: 20s
-
-
-
     stop_grace_period: 20s
-
-
-
     deploy:
-
-
-
       replicas: 1
-
-
-
       placement:
-
-
-
         constraints:
-
-
-
           - node.hostname == pavanreddyserver
-
-
-
       resources:
-
-
-
         limits:
-
-
-
           cpus: "0.35"
-
-
-
           memory: 160M
-
-
-
         reservations:
-
-
-
           cpus: "0.10"
-
-
-
           memory: 64M
-
-
-
       restart_policy:
-
-
-
         condition: on-failure
-
-
-
         delay: 5s
-
-
-
         window: 60s
-
-
-
       update_config:
-
-
-
         parallelism: 1
-
-
-
         delay: 10s
-
-
-
         order: stop-first
-
-
-
     logging:
-
-
-
       driver: json-file
-
-
-
       options:
-
-
-
         max-size: "10m"
-
-
-
         max-file: "3"
 
-
-
 secrets:
-
-
-
   platform_env_v3:
-
-
-
     external: true
 
-
-
 networks:
-
-
-
   safegate_private:
-
-
-
     driver: overlay
-
-
-
     internal: true
-
-
-
   safegate_azure_egress:
-
-
-
     driver: overlay
-
-
-
     internal: false
-
