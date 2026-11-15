@@ -71,7 +71,7 @@ services:
       PLATFORM_BASE_URL: "http://platform:4317"
       ENV_FILE: /run/secrets/dashboard_env
     secrets:
-      - source: dashboard_env_v1
+      - source: dashboard_env_v2
         target: dashboard_env
         uid: "1000"
         gid: "1000"
@@ -126,7 +126,7 @@ services:
 secrets:
   platform_env_v3:
     external: true
-  dashboard_env_v1:
+  dashboard_env_v2:
     external: true
 
 networks:

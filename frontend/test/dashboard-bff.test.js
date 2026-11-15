@@ -14,6 +14,14 @@ const {
   BIND_COOKIE_NAME
 } = require('../bff/auth');
 const { createDashboardApp } = require('../bff/app');
+const { parseEnvContent } = require('../bff/server');
+
+test('parseEnvContent strips surrounding quotes from Azure secrets cleanly', () => {
+  const env = parseEnvContent('AZURE_CLIENT_SECRET="my~Secret_Value.123"\nKEYVAULT_URL=\'https://kv.vault.azure.net\'\nPLAIN=ok\n');
+  assert.equal(env.AZURE_CLIENT_SECRET, 'my~Secret_Value.123');
+  assert.equal(env.KEYVAULT_URL, 'https://kv.vault.azure.net');
+  assert.equal(env.PLAIN, 'ok');
+});
 
 function createPlatformStub({ initialVaultToken }) {
   let validVaultToken = initialVaultToken;

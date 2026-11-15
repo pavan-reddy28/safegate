@@ -6,6 +6,26 @@ const { createSessionManager } = require('./auth');
 const { createVaultTokenClient } = require('./vault-client');
 const { createDashboardApp } = require('./app');
 
+function parseEnvContent(raw) {
+  const parsed = {};
+  for (const line of String(raw || '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let val = trimmed.slice(eq + 1).trim();
+    if (
+      val.length >= 2 &&
+      ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))
+    ) {
+      val = val.slice(1, -1);
+    }
+    parsed[key] = val;
+  }
+  return parsed;
+}
+
 function loadEnvFileIfPresent() {
   const candidates = [
     process.env.ENV_FILE,
@@ -15,14 +35,8 @@ function loadEnvFileIfPresent() {
 
   for (const filePath of candidates) {
     if (!fs.existsSync(filePath)) continue;
-    const raw = fs.readFileSync(filePath, 'utf8');
-    for (const line of raw.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eq = trimmed.indexOf('=');
-      if (eq <= 0) continue;
-      const key = trimmed.slice(0, eq).trim();
-      const val = trimmed.slice(eq + 1).trim();
+    const parsed = parseEnvContent(fs.readFileSync(filePath, 'utf8'));
+    for (const [key, val] of Object.entries(parsed)) {
       if (process.env[key] === undefined) {
         process.env[key] = val;
       }
@@ -94,11 +108,17 @@ async function bootstrap() {
   process.once('SIGINT', shutdown);
 }
 
-bootstrap().catch(err => {
-  console.error(JSON.stringify({
-    level: 'FATAL',
-    service: 'safegate-dashboard',
-    msg: err?.message || 'Bootstrap failed'
-  }));
-  process.exit(1);
-});
+if (require.main === module) {
+  bootstrap().catch(err => {
+    console.error(JSON.stringify({
+      level: 'FATAL',
+      service: 'safegate-dashboard',
+      msg: err?.message || 'Bootstrap failed'
+    }));
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  parseEnvContent
+};
