@@ -27,7 +27,22 @@ jobs:
           distribution: "temurin"
           java-version: "21"
 
+      - name: Validate Cloud Sync build secrets
+        env:
+          VITE_APP_INGEST_KEY: ${{ secrets.VITE_APP_INGEST_KEY }}
+          VITE_EVENT_PROOF_HMAC_SECRET: ${{ secrets.VITE_EVENT_PROOF_HMAC_SECRET }}
+        run: |
+          if [ -z "$VITE_APP_INGEST_KEY" ] || [ -z "$VITE_EVENT_PROOF_HMAC_SECRET" ]; then
+            echo "::error::Missing GitHub Secrets VITE_APP_INGEST_KEY or VITE_EVENT_PROOF_HMAC_SECRET in Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
       - name: Install dependencies & verify security tests
+        env:
+          VITE_SAFEGATE_PLATFORM_URL: ${{ vars.VITE_SAFEGATE_PLATFORM_URL || 'https://api.pavanserver.me' }}
+          VITE_SAFEGATE_APP_ID: ${{ vars.VITE_SAFEGATE_APP_ID || 'com.safegate.app' }}
+          VITE_APP_INGEST_KEY: ${{ secrets.VITE_APP_INGEST_KEY }}
+          VITE_EVENT_PROOF_HMAC_SECRET: ${{ secrets.VITE_EVENT_PROOF_HMAC_SECRET }}
         run: |
           npm install --no-audit --no-fund
           npm test

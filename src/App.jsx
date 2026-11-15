@@ -2,12 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import {
-  ShieldCheck,
-  ShieldBan,
-  AlertTriangle,
-  ShieldAlert,
-  PauseCircle,
-  Loader2,
   Copy,
   Check,
   ExternalLink,
@@ -15,6 +9,7 @@ import {
   RefreshCw,
   Globe
 } from "lucide-react";
+import { UrlLockerIcon } from "./components/UrlLockerIcon.jsx";
 import {
   verifyDestination,
   checkCloudOverrideForRequest
@@ -32,18 +27,6 @@ const SCAN_STAGES = [
   "Checking redirect safety",
   "Analyzing threat signals",
   "Finalizing protection check"
-];
-
-const WAVE_DELAYS = [
-  "0ms",
-  "140ms",
-  "280ms",
-  "420ms",
-  "560ms",
-  "420ms",
-  "280ms",
-  "140ms",
-  "0ms"
 ];
 
 function createFallbackRequestId() {
@@ -165,9 +148,9 @@ function AnimatedOrb({ phase }) {
           <span className="absolute -top-1 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.95)]" />
         </div>
         <div className="sg-spin-reverse absolute inset-4 rounded-full border-2 border-t-cyan-300 border-r-transparent border-b-indigo-400/70 border-l-transparent" />
-        <div className="relative flex h-18 w-18 items-center justify-center overflow-hidden rounded-2xl border border-cyan-400/50 bg-gradient-to-br from-indigo-500/25 to-cyan-500/20 text-cyan-300 shadow-[0_0_35px_rgba(34,211,238,0.35)]">
+        <div className="relative flex h-18 w-18 items-center justify-center overflow-hidden rounded-2xl border border-cyan-400/50 bg-gradient-to-br from-indigo-500/25 to-cyan-500/20 shadow-[0_0_35px_rgba(34,211,238,0.35)]">
           <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-200 to-transparent shadow-[0_0_10px_#67e8f9]" />
-          <Loader2 className="h-9 w-9 animate-spin" aria-hidden="true" />
+          <UrlLockerIcon variant="checking" className="h-11 w-11" />
         </div>
       </div>
     );
@@ -181,9 +164,9 @@ function AnimatedOrb({ phase }) {
         <div className="sg-spin-slow absolute inset-2 rounded-full border border-dashed border-rose-400/45">
           <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.9)]" />
         </div>
-        <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-rose-500/60 bg-gradient-to-br from-rose-500/25 to-rose-900/30 text-rose-400 shadow-[0_0_38px_rgba(244,63,94,0.4)]">
+        <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-rose-500/60 bg-gradient-to-br from-rose-500/25 to-rose-900/30 shadow-[0_0_38px_rgba(244,63,94,0.4)]">
           <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-rose-300/80 to-transparent" />
-          <ShieldBan className="h-10 w-10" aria-hidden="true" />
+          <UrlLockerIcon variant="blocked" className="h-12 w-12" />
         </div>
       </div>
     );
@@ -197,9 +180,9 @@ function AnimatedOrb({ phase }) {
         <div className="sg-spin-medium absolute inset-2 rounded-full border border-dashed border-amber-400/50">
           <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.9)]" />
         </div>
-        <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-amber-500/55 bg-gradient-to-br from-amber-500/20 to-orange-500/15 text-amber-400 shadow-[0_0_34px_rgba(245,158,11,0.32)]">
+        <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-amber-500/55 bg-gradient-to-br from-amber-500/20 to-orange-500/15 shadow-[0_0_34px_rgba(245,158,11,0.32)]">
           <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-amber-200/80 to-transparent" />
-          <AlertTriangle className="h-10 w-10" aria-hidden="true" />
+          <UrlLockerIcon variant="suspicious" className="h-12 w-12" />
         </div>
       </div>
     );
@@ -214,9 +197,9 @@ function AnimatedOrb({ phase }) {
           <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.9)]" />
         </div>
         <div className="sg-spin-reverse-slow absolute inset-4 rounded-full border border-sky-300/25" />
-        <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-sky-400/50 bg-gradient-to-br from-sky-500/20 to-indigo-500/15 text-sky-300 shadow-[0_0_32px_rgba(56,189,248,0.3)]">
+        <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-sky-400/50 bg-gradient-to-br from-sky-500/20 to-indigo-500/15 shadow-[0_0_32px_rgba(56,189,248,0.3)]">
           <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-sky-200/80 to-transparent" />
-          <ShieldAlert className="h-10 w-10" aria-hidden="true" />
+          <UrlLockerIcon variant="hold" className="h-12 w-12" />
         </div>
       </div>
     );
@@ -239,9 +222,9 @@ function AnimatedOrb({ phase }) {
       <div className="sg-spin-reverse-slow absolute inset-4 rounded-full border border-cyan-400/30">
         <span className="absolute -bottom-1 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
       </div>
-      <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-emerald-400/50 bg-gradient-to-br from-emerald-500/20 to-cyan-500/15 text-emerald-300 shadow-[0_0_36px_rgba(16,185,129,0.3)]">
+      <div className="sg-float-breathe relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-emerald-400/50 bg-gradient-to-br from-emerald-500/20 to-cyan-500/15 shadow-[0_0_36px_rgba(16,185,129,0.3)]">
         <div className="sg-scan-sweep pointer-events-none absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-200 to-transparent shadow-[0_0_10px_#6ee7b7]" />
-        <ShieldCheck className="h-10 w-10" aria-hidden="true" />
+        <UrlLockerIcon variant="safe" className="h-12 w-12" />
       </div>
     </div>
   );
@@ -526,6 +509,19 @@ export function App() {
       ? "sg-alert-shake"
       : "sg-card-enter";
 
+  if (phase === "ready") {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#07090e] p-6">
+        <div
+          data-testid="home-locker-emblem"
+          className="flex h-24 w-24 items-center justify-center rounded-3xl border border-white/10 bg-[#0b0f17]"
+        >
+          <UrlLockerIcon variant="ready" className="h-14 w-14" />
+        </div>
+      </main>
+    );
+  }
+
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#07090e] text-slate-100">
       <div
@@ -544,12 +540,9 @@ export function App() {
       <header className="relative z-10 border-b border-white/10 bg-[#07090e]/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-2xl items-center justify-between px-5">
           <div className="flex items-center gap-3">
-            <div className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/40 bg-emerald-500/12 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.22)]">
-              <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+            <div className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/35 bg-[#0d1420] shadow-[0_0_20px_rgba(16,185,129,0.18)]">
+              <UrlLockerIcon variant="ready" className="h-6 w-6" />
             </div>
-            <span className="text-sm font-extrabold tracking-widest text-white">
-              SAFEGATE
-            </span>
           </div>
         </div>
       </header>
@@ -564,33 +557,6 @@ export function App() {
             aria-hidden="true"
             className={`pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent ${theme.topEdge} to-transparent`}
           />
-
-          {phase === "ready" && (
-            <div className="flex flex-col items-center gap-7 py-6">
-              <AnimatedOrb phase="ready" />
-
-              <div
-                aria-hidden="true"
-                className="flex h-11 w-full items-center justify-center gap-1.5 rounded-2xl border border-emerald-500/15 bg-[#080b11]/85 px-5"
-              >
-                {WAVE_DELAYS.map((delay, idx) => (
-                  <span
-                    key={idx}
-                    style={{ animationDelay: delay }}
-                    className={`sg-wave-bar w-1.5 rounded-full bg-gradient-to-t from-emerald-500/70 to-cyan-300 ${
-                      idx === 4
-                        ? "h-6"
-                        : idx === 3 || idx === 5
-                          ? "h-5"
-                          : idx === 2 || idx === 6
-                            ? "h-4"
-                            : "h-2.5"
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
 
           {(phase === "checking" || phase === "opening") && (
             <div className="flex flex-col items-center gap-5 py-2">
@@ -767,8 +733,8 @@ export function App() {
               {holdChecksPassed ? (
                 <AnimatedOrb phase="hold" />
               ) : (
-                <div className="relative flex h-24 w-24 items-center justify-center rounded-2xl border border-sky-400/40 bg-sky-500/12 text-sky-400">
-                  <PauseCircle className="h-11 w-11" aria-hidden="true" />
+                <div className="relative flex h-24 w-24 items-center justify-center rounded-2xl border border-sky-400/40 bg-sky-500/12">
+                  <UrlLockerIcon variant="hold" className="h-12 w-12" />
                 </div>
               )}
 

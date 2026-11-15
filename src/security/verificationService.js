@@ -265,6 +265,7 @@ export async function verifyDestination(input, options = {}) {
     try {
       const existingBlock = await getBlockDetails(fpData.fingerprint);
       if (existingBlock) {
+        const blockResp = buildPersistentBlockResponse(existingBlock, fallbackRequestId, fpData.originOnly);
         if (cloudConfigured && existingBlock.requestId && existingBlock.requestId !== "UNKNOWN") {
           const cloudDecision = await fetchCloudDecisionByRequestId(existingBlock.requestId);
           if (cloudDecision?.found && cloudDecision.allowOpen) {
@@ -272,8 +273,10 @@ export async function verifyDestination(input, options = {}) {
             rememberRequestForFingerprint(fpData.fingerprint, existingBlock.requestId, "SAFE");
             return buildCloudUnblockResponse(existingBlock.requestId, fpData.originOnly);
           }
+          if (!cloudDecision?.found && cloudDecision?.statusCode === 404) {
+            await syncVerificationToCloud(input, blockResp).catch(() => null);
+          }
         }
-        const blockResp = buildPersistentBlockResponse(existingBlock, fallbackRequestId, fpData.originOnly);
         return cloudConfigured
           ? { ...blockResp, cloudSync: { synced: true, configured: true, requestId: blockResp.requestId } }
           : blockResp;
