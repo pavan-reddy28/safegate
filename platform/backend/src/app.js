@@ -1579,6 +1579,7 @@ function createApp({
   app.delete('/api/v1/events/:requestId', authenticateOperatorVault, (req, res, next) => {
     try {
       const { requestId } = req.params;
+      const archiveOnly = req.query.archive === 'true';
 
       if (!isValidId(requestId)) {
         return sendError(res, 400, 'INVALID_REQUEST_ID', 'Invalid requestId', req.requestId);
@@ -1596,31 +1597,57 @@ function createApp({
 
       const now = new Date().toISOString();
 
-      if (existing.status !== 'ARCHIVED') {
-        const archiveTx = db.transaction(() => {
-          db.prepare(`
-            UPDATE security_events
-            SET status = 'ARCHIVED', updated_at = ?
-            WHERE request_id = ?
-          `).run(now, requestId);
+      if (archiveOnly) {
+        if (existing.status !== 'ARCHIVED') {
+          const archiveTx = db.transaction(() => {
+            db.prepare(`
+              UPDATE security_events
+              SET status = 'ARCHIVED', updated_at = ?
+              WHERE request_id = ?
+            `).run(now, requestId);
 
-          insertAdminActionStmt.run(
-            requestId,
-            existing.device_id,
-            'keyvault-operator',
-            'DELETE:ARCHIVED',
-            now
-          );
+            insertAdminActionStmt.run(
+              requestId,
+              existing.device_id,
+              'keyvault-operator',
+              'DELETE:ARCHIVED',
+              now
+            );
+          });
+          archiveTx();
+        }
+
+        writeLog('info', 'Security event archived by operator', { requestId });
+
+        return res.status(200).json({
+          message: 'Event archived successfully',
+          requestId,
+          status: 'ARCHIVED'
         });
-        archiveTx();
       }
 
-      writeLog('info', 'Security event archived by operator', { requestId });
+      const deleteTx = db.transaction(() => {
+        db.prepare(`
+          DELETE FROM security_events
+          WHERE request_id = ?
+        `).run(requestId);
+
+        insertAdminActionStmt.run(
+          requestId,
+          existing.device_id,
+          'keyvault-operator',
+          'DELETE:PURGED',
+          now
+        );
+      });
+      deleteTx();
+
+      writeLog('info', 'Security event deleted from database by operator', { requestId });
 
       return res.status(200).json({
-        message: 'Event archived successfully',
+        message: 'Event deleted from database successfully',
         requestId,
-        status: 'ARCHIVED'
+        deleted: true
       });
     } catch (error) {
       next(error);

@@ -147,6 +147,10 @@ function createSqliteMock() {
             }
             return { changes: 1 };
           }
+          if (sql.includes('DELETE FROM security_events')) {
+            const deleted = events.delete(args[0]);
+            return { changes: deleted ? 1 : 0 };
+          }
           return { changes: 0 };
         },
         get(...args) {
@@ -653,19 +657,19 @@ test('Two-Plane Auth enforces App-Only POST ingest with replay/privacy protectio
     assert.equal(badPatch.status, 400);
     assert.equal(badPatch.json.error.code, 'PRIVACY_VIOLATION_REJECTED');
 
-    // 13. Key Vault Bearer token -> DELETE /api/v1/events/:requestId archives event & audits action
+    // 13. Key Vault Bearer token -> DELETE /api/v1/events/:requestId permanently removes event from DB & audits action
     const deleteRes = await sendHttpRequest(port, 'DELETE', `/api/v1/events/${requestId}`, {
       Authorization: `Bearer ${vaultBearerToken}`
     });
     assert.equal(deleteRes.status, 200);
-    assert.equal(deleteRes.json.status, 'ARCHIVED');
+    assert.equal(deleteRes.json.deleted, true);
     assert.equal(db.adminActions.length, 2);
 
     const afterDelete = await sendHttpRequest(port, 'GET', `/api/v1/events/${requestId}`, {
       Authorization: `Bearer ${vaultBearerToken}`
     });
-    assert.equal(afterDelete.status, 200);
-    assert.equal(afterDelete.json.event.status, 'ARCHIVED');
+    assert.equal(afterDelete.status, 404);
+    assert.equal(afterDelete.json.error.code, 'EVENT_NOT_FOUND');
 
     // 14. App-Only decision check + Operator Unblock / Re-Block workflow (requestId2 was inserted as BLOCK)
     const blockedDecisionCheck = await sendHttpRequest(
