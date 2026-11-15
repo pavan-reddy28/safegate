@@ -47,4 +47,4 @@ USER node
 
 EXPOSE 4317
 
-CMD ["node", "--disallow-code-generation-from-strings", "src/server.js"]
+CMD ["node", "src/server.js"]

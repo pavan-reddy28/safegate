@@ -117,6 +117,22 @@ const ALLOWED_PATCH_KEYS = new Set([
   'notes'
 ]);
 
+const DEFAULT_ACTION_FOR_DECISION = {
+  BLOCK: 'DO_NOT_OPEN',
+  SUSPICIOUS: 'WARN_USER',
+  HOLD: 'HOLD',
+  SAFE: 'ALLOW',
+  KNOWN_SAFE: 'ALLOW',
+  NO_KNOWN_THREAT: 'ALLOW_WITH_CAUTION'
+};
+
+const CAPACITOR_APP_ORIGINS = new Set([
+  'https://localhost',
+  'http://localhost',
+  'capacitor://localhost',
+  'ionic://localhost'
+]);
+
 function isTrustedProxyAddress(address) {
   if (!address || typeof address !== 'string') return false;
   const cleaned = address.replace(/^::ffff:/, '').trim();
@@ -454,6 +470,7 @@ function createApp({
     if (pathname === '/health') return '/health';
     if (pathname === '/ready') return '/ready';
     if (pathname === '/api/v1/events') return '/api/v1/events';
+    if (/^\/api\/v1\/app\/events\/[^/]+\/decision$/.test(pathname)) return '/api/v1/app/events/:requestId/decision';
     if (/^\/api\/v1\/events\/[^/]+$/.test(pathname)) return '/api/v1/events/:requestId';
 
     return String(pathname).slice(0, 256);
@@ -615,6 +632,24 @@ function createApp({
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    next();
+  });
+
+  app.use('/api/v1', (req, res, next) => {
+    const origin = req.get('origin');
+    if (origin && CAPACITOR_APP_ORIGINS.has(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, X-SafeGate-App, X-SafeGate-App-Key, X-SafeGate-Proof, X-SafeGate-Device-Id'
+      );
+      res.setHeader('Access-Control-Max-Age', '600');
+      if (req.method === 'OPTIONS') {
+        return res.status(204).end();
+      }
+    }
     next();
   });
 
@@ -1397,6 +1432,11 @@ function createApp({
         }
         setClauses.push('decision = ?');
         values.push(nextDecision);
+
+        if (body.recommendedAction === undefined && DEFAULT_ACTION_FOR_DECISION[nextDecision]) {
+          setClauses.push('recommended_action = ?');
+          values.push(DEFAULT_ACTION_FOR_DECISION[nextDecision]);
+        }
       }
 
       if (body.localDecision !== undefined) {
@@ -1587,14 +1627,81 @@ function createApp({
     }
   });
 
+  // --------------------------------------------------
+  // PLANE A (READ-ONLY SELF-CHECK): APP-ONLY OVERRIDE STATUS BY REQUEST ID
+  // Allows the app to check if an operator unblocked or blocked a specific requestId.
+  // Requires App auth + matching deviceId (no cross-device data exposure).
+  // --------------------------------------------------
+
+  app.get('/api/v1/app/events/:requestId/decision', authenticateAppIngest, (req, res, next) => {
+    try {
+      const { requestId } = req.params;
+      const deviceId = String(req.query.deviceId || req.get('x-safegate-device-id') || '').trim();
+
+      if (!isValidId(requestId)) {
+        return sendError(res, 400, 'INVALID_REQUEST_ID', 'Invalid requestId', req.requestId);
+      }
+
+      if (!isValidId(deviceId)) {
+        return sendError(res, 400, 'INVALID_DEVICE_ID', 'Valid deviceId is required', req.requestId);
+      }
+
+      const row = db.prepare(`
+        SELECT request_id, device_id, decision, recommended_action, status, updated_at
+        FROM security_events
+        WHERE request_id = ? AND device_id = ?
+      `).get(requestId, deviceId);
+
+      if (!row) {
+        return sendError(res, 404, 'EVENT_NOT_FOUND', 'Event not found', req.requestId);
+      }
+
+      const decision = String(row.decision || 'HOLD').toUpperCase();
+      const recommendedAction = row.recommended_action || DEFAULT_ACTION_FOR_DECISION[decision] || 'HOLD';
+      const status = row.status || 'OPEN';
+
+      const blocked =
+        decision === 'BLOCK' ||
+        recommendedAction === 'DO_NOT_OPEN';
+
+      const allowOpen =
+        !blocked &&
+        (
+          decision === 'SAFE' ||
+          decision === 'KNOWN_SAFE' ||
+          decision === 'NO_KNOWN_THREAT' ||
+          recommendedAction === 'ALLOW' ||
+          recommendedAction === 'ALLOW_WITH_CAUTION'
+        );
+
+      return res.status(200).json({
+        requestId: row.request_id,
+        status,
+        decision,
+        recommendedAction,
+        blocked,
+        allowOpen,
+        overrideActive: status !== 'OPEN' || allowOpen,
+        updatedAt: row.updated_at
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Unsupported method handlers
   app.all('/api/v1/events', (req, res) => {
-    res.setHeader('Allow', 'GET, POST');
+    res.setHeader('Allow', 'GET, POST, OPTIONS');
     return sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed for this endpoint', req.requestId);
   });
 
   app.all('/api/v1/events/:requestId', (req, res) => {
-    res.setHeader('Allow', 'GET, PATCH, DELETE');
+    res.setHeader('Allow', 'GET, PATCH, DELETE, OPTIONS');
+    return sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed for this endpoint', req.requestId);
+  });
+
+  app.all('/api/v1/app/events/:requestId/decision', (req, res) => {
+    res.setHeader('Allow', 'GET, OPTIONS');
     return sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed for this endpoint', req.requestId);
   });
 

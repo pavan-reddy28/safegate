@@ -150,6 +150,11 @@ function createSqliteMock() {
           return { changes: 0 };
         },
         get(...args) {
+          if (sql.includes('FROM security_events') && sql.includes('WHERE request_id = ? AND device_id = ?')) {
+            const row = events.get(args[0]);
+            if (!row || row.device_id !== args[1]) return undefined;
+            return row;
+          }
           if (sql.includes('FROM security_events') && sql.includes('WHERE request_id = ?')) {
             return events.get(args[0]) || undefined;
           }
@@ -661,6 +666,101 @@ test('Two-Plane Auth enforces App-Only POST ingest with replay/privacy protectio
     });
     assert.equal(afterDelete.status, 200);
     assert.equal(afterDelete.json.event.status, 'ARCHIVED');
+
+    // 14. App-Only decision check + Operator Unblock / Re-Block workflow (requestId2 was inserted as BLOCK)
+    const blockedDecisionCheck = await sendHttpRequest(
+      port,
+      'GET',
+      `/api/v1/app/events/${requestId2}/decision?deviceId=${deviceId}`,
+      {
+        'X-SafeGate-App': 'com.safegate.app',
+        'X-SafeGate-App-Key': appIngestKey
+      }
+    );
+    assert.equal(blockedDecisionCheck.status, 200);
+    assert.equal(blockedDecisionCheck.json.blocked, true);
+    assert.equal(blockedDecisionCheck.json.allowOpen, false);
+
+    // Wrong deviceId cannot query another device's requestId decision
+    const wrongDeviceCheck = await sendHttpRequest(
+      port,
+      'GET',
+      `/api/v1/app/events/${requestId2}/decision?deviceId=other-device-999`,
+      {
+        'X-SafeGate-App': 'com.safegate.app',
+        'X-SafeGate-App-Key': appIngestKey
+      }
+    );
+    assert.equal(wrongDeviceCheck.status, 404);
+
+    // Key Vault Bearer token cannot access App-Only decision endpoint directly
+    const vaultTriedAppCheck = await sendHttpRequest(
+      port,
+      'GET',
+      `/api/v1/app/events/${requestId2}/decision?deviceId=${deviceId}`,
+      {
+        Authorization: `Bearer ${vaultBearerToken}`,
+        'X-SafeGate-App': 'com.safegate.app'
+      }
+    );
+    assert.equal(vaultTriedAppCheck.status, 401);
+
+    // Operator unblocks requestId2 by patching decision to SAFE (recommendedAction auto-syncs to ALLOW)
+    const operatorUnblock = await sendHttpRequest(
+      port,
+      'PATCH',
+      `/api/v1/events/${requestId2}`,
+      {
+        Authorization: `Bearer ${vaultBearerToken}`,
+        'Content-Type': 'application/json'
+      },
+      {
+        decision: 'SAFE',
+        status: 'RESOLVED',
+        notes: 'False positive verified by operator'
+      }
+    );
+    assert.equal(operatorUnblock.status, 200);
+    assert.equal(operatorUnblock.json.event.recommendedAction, 'ALLOW');
+
+    const unblockedDecisionCheck = await sendHttpRequest(
+      port,
+      'GET',
+      `/api/v1/app/events/${requestId2}/decision?deviceId=${deviceId}`,
+      {
+        'X-SafeGate-App': 'com.safegate.app',
+        'X-SafeGate-App-Key': appIngestKey
+      }
+    );
+    assert.equal(unblockedDecisionCheck.status, 200);
+    assert.equal(unblockedDecisionCheck.json.blocked, false);
+    assert.equal(unblockedDecisionCheck.json.allowOpen, true);
+
+    // Operator re-blocks requestId2
+    const operatorReblock = await sendHttpRequest(
+      port,
+      'PATCH',
+      `/api/v1/events/${requestId2}`,
+      {
+        Authorization: `Bearer ${vaultBearerToken}`,
+        'Content-Type': 'application/json'
+      },
+      {
+        decision: 'BLOCK',
+        status: 'OPEN'
+      }
+    );
+    assert.equal(operatorReblock.status, 200);
+    assert.equal(operatorReblock.json.event.recommendedAction, 'DO_NOT_OPEN');
+
+    // Capacitor WebView CORS preflight (OPTIONS) succeeds cleanly
+    const corsPreflight = await sendHttpRequest(port, 'OPTIONS', '/api/v1/events', {
+      Origin: 'https://localhost',
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type,x-safegate-app,x-safegate-app-key'
+    });
+    assert.equal(corsPreflight.status, 204);
+    assert.equal(corsPreflight.headers['access-control-allow-origin'], 'https://localhost');
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

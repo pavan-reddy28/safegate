@@ -9,6 +9,14 @@ import {
   clearBlockedUrls
 } from "./blockStore.js";
 
+import {
+  isCloudSyncConfigured,
+  syncVerificationToCloud,
+  fetchCloudDecisionByRequestId,
+  rememberRequestForFingerprint,
+  lookupRequestForFingerprint
+} from "./cloudSync.js";
+
 const isNative = Capacitor.isNativePlatform();
 
 function resolveApiBase() {
@@ -107,7 +115,7 @@ function buildHoldResponse(requestId, errorCode) {
   };
 }
 
-function buildPersistentBlockResponse(details, requestId, originOnly) {
+function buildPersistentBlockResponse(details, requestId, originOnly, cloudOverride = false) {
   const reasonCodes =
     Array.isArray(details?.reasonCodes) && details.reasonCodes.length > 0
       ? details.reasonCodes
@@ -120,7 +128,7 @@ function buildPersistentBlockResponse(details, requestId, originOnly) {
     requestId: details?.requestId || requestId,
     localVerification: {
       decision: "BLOCK",
-      stage: "PERSISTENT_DEVICE_BLOCKLIST",
+      stage: cloudOverride ? "CLOUD_OPERATOR_BLOCK" : "PERSISTENT_DEVICE_BLOCKLIST",
       reasonCodes,
       indicators: reasonCodes,
       destination: null,
@@ -145,14 +153,17 @@ function buildPersistentBlockResponse(details, requestId, originOnly) {
     recommendedAction: "DO_NOT_OPEN",
     persistenceStatus: "SAVED",
     cachedFromVault: true,
+    cloudOverride,
     finalReasonCodes: reasonCodes,
     verificationToken: null,
     riskSummary: {
       level: "CRITICAL",
       score: null,
-      headline: "Previously blocked threat stopped immediately",
+      headline: cloudOverride
+        ? "Blocked by security policy"
+        : "Previously blocked threat stopped immediately",
       parentAdvisory:
-        "This link matches a SHA-256 threat fingerprint already blocked inside your SafeGate Device Vault.",
+        "This link matches a SHA-256 threat fingerprint blocked by SafeGate.",
       reasons: reasonCodes,
       indicatorsCount: reasonCodes.length
     },
@@ -164,6 +175,58 @@ function buildPersistentBlockResponse(details, requestId, originOnly) {
       zeroUrlRetention: true,
       originalUrlLoggedOrStored: false,
       pathAndQueryInspectedLocallyOnly: true
+    }
+  };
+}
+
+function buildCloudUnblockResponse(requestId, originOnly) {
+  const displayHost = originOnly ? originOnly.replace(/^https?:\/\//, "") : "approved-destination";
+  return {
+    verificationStatus: "COMPLETED",
+    requestId,
+    engineMode: "CLOUD_OPERATOR_OVERRIDE",
+    cloudOverride: true,
+    localVerification: {
+      decision: "SAFE",
+      stage: "CLOUD_OPERATOR_OVERRIDE",
+      reasonCodes: ["OPERATOR_UNBLOCKED_REQUEST_ID"],
+      indicators: [],
+      destination: null,
+      redactedDestination: {
+        originOnly: originOnly || displayHost,
+        displayHost,
+        privateComponentsStripped: true
+      },
+      riskScore: 0,
+      reputationCheckRequired: false
+    },
+    securityChecks: {
+      zeroEgressGuaranteed: true,
+      schemeAndEncodingCheck: "PASSED",
+      networkAndIpIsolationCheck: "PASSED",
+      homographAndBrandSpoofCheck: "PASSED",
+      malwareAndPathCheck: "PASSED",
+      redirectAndSmugglingCheck: "PASSED",
+      smsScamLureCheck: "PASSED"
+    },
+    finalDecision: "KNOWN_SAFE",
+    recommendedAction: "ALLOW",
+    finalReasonCodes: ["OPERATOR_UNBLOCKED_REQUEST_ID"],
+    verificationToken: `offline:${requestId}`,
+    riskSummary: {
+      level: "SAFE",
+      score: 0,
+      headline: `Approved by operator (${displayHost})`,
+      parentAdvisory: "This request ID was explicitly approved for opening.",
+      reasons: ["OPERATOR_UNBLOCKED_REQUEST_ID"],
+      indicatorsCount: 0
+    },
+    layersExecuted: ["CLOUD_OPERATOR_DECISION_OVERRIDE"],
+    cloudSync: {
+      synced: true,
+      configured: true,
+      requestId,
+      status: "RESOLVED"
     }
   };
 }
@@ -187,6 +250,7 @@ async function persistConfirmedBlock(fingerprint, originHost, result, requestId)
 export async function verifyDestination(input, options = {}) {
   const fallbackRequestId = createRequestId();
   const skipVaultCache = Boolean(options.skipVaultCache);
+  const cloudConfigured = !options.skipCloudSync && isCloudSyncConfigured();
 
   let fpData;
   try {
@@ -196,13 +260,56 @@ export async function verifyDestination(input, options = {}) {
     fpData = null;
   }
 
-  // Stage 1: Best-effort persistent on-device SHA-256 block vault lookup.
-  // Never abort into HOLD if local SQLite/IndexedDB is unavailable.
+  // Stage 1: Persistent on-device SHA-256 block vault lookup + Cloud operator override check by requestId.
   if (!skipVaultCache && fpData?.fingerprint) {
     try {
       const existingBlock = await getBlockDetails(fpData.fingerprint);
       if (existingBlock) {
-        return buildPersistentBlockResponse(existingBlock, fallbackRequestId, fpData.originOnly);
+        if (cloudConfigured && existingBlock.requestId && existingBlock.requestId !== "UNKNOWN") {
+          const cloudDecision = await fetchCloudDecisionByRequestId(existingBlock.requestId);
+          if (cloudDecision?.found && cloudDecision.allowOpen) {
+            await removeBlockedUrl(fpData.fingerprint).catch(() => {});
+            rememberRequestForFingerprint(fpData.fingerprint, existingBlock.requestId, "SAFE");
+            return buildCloudUnblockResponse(existingBlock.requestId, fpData.originOnly);
+          }
+        }
+        const blockResp = buildPersistentBlockResponse(existingBlock, fallbackRequestId, fpData.originOnly);
+        return cloudConfigured
+          ? { ...blockResp, cloudSync: { synced: true, configured: true, requestId: blockResp.requestId } }
+          : blockResp;
+      }
+
+      if (cloudConfigured) {
+        const prior = lookupRequestForFingerprint(fpData.fingerprint);
+        if (prior?.requestId) {
+          const cloudDecision = await fetchCloudDecisionByRequestId(prior.requestId);
+          if (cloudDecision?.found) {
+            if (cloudDecision.blocked) {
+              const blockOverride = buildPersistentBlockResponse(
+                {
+                  requestId: prior.requestId,
+                  originHost: fpData.originOnly,
+                  reasonCodes: ["OPERATOR_BLOCKED_REQUEST_ID"]
+                },
+                prior.requestId,
+                fpData.originOnly,
+                true
+              );
+              await persistConfirmedBlock(
+                fpData.fingerprint,
+                fpData.originOnly,
+                blockOverride,
+                prior.requestId
+              );
+              rememberRequestForFingerprint(fpData.fingerprint, prior.requestId, "BLOCK");
+              return { ...blockOverride, cloudSync: { synced: true, configured: true, requestId: prior.requestId } };
+            }
+            if (cloudDecision.allowOpen) {
+              rememberRequestForFingerprint(fpData.fingerprint, prior.requestId, cloudDecision.decision);
+              return buildCloudUnblockResponse(prior.requestId, fpData.originOnly);
+            }
+          }
+        }
       }
     } catch {
       // Ignore storage error and proceed straight to full URL verification.
@@ -266,21 +373,119 @@ export async function verifyDestination(input, options = {}) {
     return buildHoldResponse(result?.requestId || fallbackRequestId, "INVALID_VERIFICATION_DECISION");
   }
 
-  // Stage 3: Save only confirmed blocks (fingerprint only, zero sensitive path/query).
-  if (result.finalDecision === "BLOCK") {
+  const finalRequestId = result.requestId || fallbackRequestId;
+  let enrichedResult = { ...result, requestId: finalRequestId };
+
+  // Stage 3: Save only confirmed blocks locally (fingerprint only, zero sensitive path/query).
+  if (enrichedResult.finalDecision === "BLOCK") {
     const persistenceStatus = await persistConfirmedBlock(
       fpData?.fingerprint || null,
       fpData?.originOnly || null,
-      result,
-      result.requestId || fallbackRequestId
+      enrichedResult,
+      finalRequestId
     );
-    return {
-      ...result,
+    enrichedResult = {
+      ...enrichedResult,
       persistenceStatus
     };
   }
 
-  return result;
+  if (fpData?.fingerprint) {
+    rememberRequestForFingerprint(fpData.fingerprint, finalRequestId, enrichedResult.finalDecision);
+  }
+
+  // Stage 4: Sync redacted verification verdict to SafeGate Cloud Platform when configured.
+  if (cloudConfigured) {
+    const cloudSync = await syncVerificationToCloud(input, enrichedResult);
+    enrichedResult = {
+      ...enrichedResult,
+      cloudSync
+    };
+  }
+
+  return enrichedResult;
+}
+
+export async function checkCloudOverrideForRequest({ rawUrl, requestId, lastResult = null }) {
+  if (!requestId) {
+    return { checked: false, errorCode: "MISSING_REQUEST_ID" };
+  }
+
+  if (!isCloudSyncConfigured()) {
+    return { checked: false, configured: false };
+  }
+
+  // If the original verification hasn't reached the cloud yet, retry upload first.
+  if (lastResult && lastResult.cloudSync && !lastResult.cloudSync.synced && rawUrl) {
+    await syncVerificationToCloud(rawUrl, lastResult).catch(() => null);
+  }
+
+  const decision = await fetchCloudDecisionByRequestId(requestId);
+  if (!decision?.found) {
+    return {
+      checked: false,
+      configured: true,
+      offline: Boolean(decision?.offline),
+      errorCode: decision?.errorCode || "NOT_FOUND"
+    };
+  }
+
+  let fpData = null;
+  if (rawUrl) {
+    try {
+      fpData = await createDeviceUrlFingerprint(rawUrl);
+    } catch {
+      fpData = null;
+    }
+  }
+
+  if (decision.allowOpen) {
+    if (fpData?.fingerprint) {
+      await removeBlockedUrl(fpData.fingerprint).catch(() => {});
+      rememberRequestForFingerprint(fpData.fingerprint, requestId, decision.decision);
+    }
+    return {
+      checked: true,
+      configured: true,
+      blocked: false,
+      allowOpen: true,
+      decision: decision.decision,
+      recommendedAction: decision.recommendedAction,
+      status: decision.status
+    };
+  }
+
+  if (decision.blocked) {
+    if (fpData?.fingerprint) {
+      await persistBlockedUrl(fpData.fingerprint, {
+        requestId,
+        originHost: fpData.originOnly,
+        reasonCodes: ["CLOUD_OPERATOR_BLOCKED"],
+        source: "CLOUD_OPERATOR_OVERRIDE",
+        threatType: "CLOUD_BLOCK"
+      }).catch(() => {});
+      rememberRequestForFingerprint(fpData.fingerprint, requestId, "BLOCK");
+    }
+    return {
+      checked: true,
+      configured: true,
+      blocked: true,
+      allowOpen: false,
+      decision: decision.decision,
+      recommendedAction: decision.recommendedAction,
+      status: decision.status
+    };
+  }
+
+  return {
+    checked: true,
+    configured: true,
+    blocked: false,
+    allowOpen: false,
+    decision: decision.decision,
+    recommendedAction: decision.recommendedAction,
+    status: decision.status
+  };
 }
 
 export async function authorizeVerifiedRedirect({

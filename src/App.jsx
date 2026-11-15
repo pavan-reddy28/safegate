@@ -12,10 +12,13 @@ import {
   Check,
   ExternalLink,
   ArrowLeft,
-  Sparkles,
+  RefreshCw,
   Globe
 } from "lucide-react";
-import { verifyDestination } from "./security/verificationService.js";
+import {
+  verifyDestination,
+  checkCloudOverrideForRequest
+} from "./security/verificationService.js";
 import {
   isValidExternalHttpUrl,
   openInExternalBrowser
@@ -277,7 +280,7 @@ function RequestIdBadge({ value }) {
         type="button"
         onClick={copyRequestId}
         aria-label="Copy request ID"
-        className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white active:scale-95"
+        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white active:scale-95"
       >
         {copied ? (
           <Check className="h-4 w-4 text-emerald-400" aria-hidden="true" />
@@ -296,8 +299,11 @@ export function App() {
   const [holdChecksPassed, setHoldChecksPassed] = useState(false);
   const [displayHost, setDisplayHost] = useState("");
   const [scanStageIdx, setScanStageIdx] = useState(0);
+  const [checkingCloud, setCheckingCloud] = useState(false);
+  const [cloudNotice, setCloudNotice] = useState("");
 
   const destinationRef = useRef("");
+  const lastResultRef = useRef(null);
   const processingRef = useRef(false);
   const lastUrlRef = useRef("");
   const lastReceivedAtRef = useRef(0);
@@ -343,10 +349,13 @@ export function App() {
 
       const localId = createFallbackRequestId();
       destinationRef.current = url;
+      lastResultRef.current = null;
       setRequestId(localId);
       setHeadline("");
       setHoldChecksPassed(false);
       setDisplayHost("");
+      setCloudNotice("");
+      setCheckingCloud(false);
       setScanStageIdx(0);
 
       if (!isValidExternalHttpUrl(url)) {
@@ -361,6 +370,7 @@ export function App() {
         const result = await verifyDestination(url);
         if (!mountedRef.current) return;
 
+        lastResultRef.current = result;
         setRequestId(getRequestId(result, localId));
         setHeadline(result?.riskSummary?.headline || "");
         setDisplayHost(
@@ -397,6 +407,54 @@ export function App() {
     },
     [openDestinationDirectly]
   );
+
+  const handleCheckCloudStatus = useCallback(async () => {
+    if (!requestId || checkingCloud || processingRef.current) return;
+
+    setCheckingCloud(true);
+    setCloudNotice("");
+
+    try {
+      const decision = await checkCloudOverrideForRequest({
+        rawUrl: destinationRef.current,
+        requestId,
+        lastResult: lastResultRef.current
+      });
+      if (!mountedRef.current) return;
+
+      if (decision.allowOpen) {
+        setHeadline("Approved by operator. Handed off to your browser.");
+        setPhase("opening");
+        await openDestinationDirectly(destinationRef.current);
+        if (mountedRef.current) {
+          setPhase("safe");
+        }
+        return;
+      }
+
+      if (decision.blocked) {
+        setPhase("blocked");
+        setCloudNotice("Still blocked");
+        return;
+      }
+
+      if (decision.configured === false) {
+        setCloudNotice("Cloud check not configured");
+      } else if (decision.offline) {
+        setCloudNotice("Could not reach cloud status");
+      } else {
+        setCloudNotice("No override update yet");
+      }
+    } catch {
+      if (mountedRef.current) {
+        setCloudNotice("Could not reach cloud status");
+      }
+    } finally {
+      if (mountedRef.current) {
+        setCheckingCloud(false);
+      }
+    }
+  }, [requestId, checkingCloud, openDestinationDirectly]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -449,13 +507,16 @@ export function App() {
   }, [handleIncomingUrl]);
 
   const resetToReady = () => {
-    if (processingRef.current) return;
+    if (processingRef.current || checkingCloud) return;
     destinationRef.current = "";
+    lastResultRef.current = null;
     lastUrlRef.current = "";
     setRequestId("");
     setHeadline("");
     setHoldChecksPassed(false);
     setDisplayHost("");
+    setCloudNotice("");
+    setCheckingCloud(false);
     setPhase("ready");
   };
 
@@ -490,12 +551,6 @@ export function App() {
               SAFEGATE
             </span>
           </div>
-
-          <div className="flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 font-mono text-[11px] font-bold tracking-wider text-emerald-300">
-            <span className="h-2 w-2 animate-ping rounded-full bg-emerald-400 opacity-75" />
-            <span className="-ml-4 h-2 w-2 rounded-full bg-emerald-400" />
-            SHIELD ACTIVE
-          </div>
         </div>
       </header>
 
@@ -511,21 +566,8 @@ export function App() {
           />
 
           {phase === "ready" && (
-            <div className="flex flex-col items-center gap-6 py-3">
+            <div className="flex flex-col items-center gap-7 py-6">
               <AnimatedOrb phase="ready" />
-
-              <div className="space-y-2.5">
-                <div className="inline-flex items-center gap-1.5 font-mono text-[11px] font-bold tracking-[0.2em] text-emerald-400">
-                  <Sparkles className="h-3.5 w-3.5 animate-pulse" aria-hidden="true" />
-                  LIVE LINK GUARD
-                </div>
-                <h1 className="text-3xl font-extrabold tracking-tight text-white">
-                  Tap Any Link
-                </h1>
-                <p className="mx-auto max-w-xs text-sm leading-relaxed text-slate-400">
-                  Unsafe destinations are stopped instantly. Clean links open straight in Chrome or your browser.
-                </p>
-              </div>
 
               <div
                 aria-hidden="true"
@@ -624,14 +666,44 @@ export function App() {
                 </p>
               </div>
               <RequestIdBadge value={requestId} />
-              <button
-                type="button"
-                onClick={resetToReady}
-                className="relative min-h-[48px] w-full cursor-pointer overflow-hidden rounded-xl bg-rose-600 px-5 text-sm font-bold text-white shadow-[0_10px_28px_rgba(225,29,72,0.4)] transition hover:bg-rose-500 active:scale-[0.98]"
-              >
-                <span className="sg-shimmer-sweep pointer-events-none absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/25 to-transparent" />
-                Done
-              </button>
+              {cloudNotice && (
+                <p data-testid="cloud-status-notice" className="text-xs font-medium text-slate-400">
+                  {cloudNotice}
+                </p>
+              )}
+              {phase === "blocked" ? (
+                <div className="flex w-full flex-col gap-2.5 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={handleCheckCloudStatus}
+                    disabled={checkingCloud}
+                    className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-white/15 bg-white/8 px-4 text-sm font-bold text-white transition hover:bg-white/14 active:scale-[0.98] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <RefreshCw
+                      className={`h-4 w-4 ${checkingCloud ? "animate-spin" : ""}`}
+                      aria-hidden="true"
+                    />
+                    {checkingCloud ? "Checking..." : "Check Status"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetToReady}
+                    className="relative min-h-[48px] flex-1 cursor-pointer overflow-hidden whitespace-nowrap rounded-xl bg-rose-600 px-5 text-sm font-bold text-white shadow-[0_10px_28px_rgba(225,29,72,0.4)] transition hover:bg-rose-500 active:scale-[0.98]"
+                  >
+                    <span className="sg-shimmer-sweep pointer-events-none absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={resetToReady}
+                  className="relative min-h-[48px] w-full cursor-pointer overflow-hidden whitespace-nowrap rounded-xl bg-rose-600 px-5 text-sm font-bold text-white shadow-[0_10px_28px_rgba(225,29,72,0.4)] transition hover:bg-rose-500 active:scale-[0.98]"
+                >
+                  <span className="sg-shimmer-sweep pointer-events-none absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+                  Done
+                </button>
+              )}
             </div>
           )}
 
@@ -650,22 +722,41 @@ export function App() {
                 </p>
               </div>
               <RequestIdBadge value={requestId} />
-              <div className="flex w-full flex-col gap-2.5 sm:flex-row">
+              {cloudNotice && (
+                <p data-testid="cloud-status-notice" className="text-xs font-medium text-slate-400">
+                  {cloudNotice}
+                </p>
+              )}
+              <div className="flex w-full flex-col gap-2.5">
+                <div className="flex w-full flex-col gap-2.5 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={resetToReady}
+                    className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-white/10 px-4 text-sm font-bold text-white transition hover:bg-white/15 active:scale-[0.98]"
+                  >
+                    <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                    Go Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openDestinationDirectly()}
+                    className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-amber-400/50 bg-amber-500/18 px-4 text-sm font-bold text-amber-100 transition hover:bg-amber-500/28 active:scale-[0.98]"
+                  >
+                    Open Anyway
+                    <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={resetToReady}
-                  className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl bg-white/10 px-4 text-sm font-bold text-white transition hover:bg-white/15 active:scale-[0.98]"
+                  onClick={handleCheckCloudStatus}
+                  disabled={checkingCloud}
+                  className="inline-flex min-h-[48px] w-full cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-white/15 bg-white/8 px-4 text-sm font-bold text-white transition hover:bg-white/14 active:scale-[0.98] disabled:cursor-wait disabled:opacity-60"
                 >
-                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                  Go Back
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openDestinationDirectly()}
-                  className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-amber-400/50 bg-amber-500/18 px-4 text-sm font-bold text-amber-100 transition hover:bg-amber-500/28 active:scale-[0.98]"
-                >
-                  Open Anyway
-                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  <RefreshCw
+                    className={`h-4 w-4 ${checkingCloud ? "animate-spin" : ""}`}
+                    aria-hidden="true"
+                  />
+                  {checkingCloud ? "Checking..." : "Check Status"}
                 </button>
               </div>
             </div>
@@ -697,34 +788,68 @@ export function App() {
 
               <RequestIdBadge value={requestId} />
 
+              {cloudNotice && (
+                <p data-testid="cloud-status-notice" className="text-xs font-medium text-slate-400">
+                  {cloudNotice}
+                </p>
+              )}
+
               {holdChecksPassed ? (
-                <div className="flex w-full flex-col gap-2.5 sm:flex-row">
+                <div className="flex w-full flex-col gap-2.5">
+                  <div className="flex w-full flex-col gap-2.5 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={resetToReady}
+                      className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-white/10 px-4 text-sm font-bold text-white transition hover:bg-white/15 active:scale-[0.98]"
+                    >
+                      <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                      Go Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openDestinationDirectly()}
+                      className="relative inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-xl border border-sky-400/50 bg-sky-500/18 px-4 text-sm font-bold text-sky-100 transition hover:bg-sky-500/28 active:scale-[0.98]"
+                    >
+                      <span className="sg-shimmer-sweep pointer-events-none absolute inset-y-0 w-14 bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+                      Open Anyway
+                      <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={resetToReady}
-                    className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl bg-white/10 px-4 text-sm font-bold text-white transition hover:bg-white/15 active:scale-[0.98]"
+                    onClick={handleCheckCloudStatus}
+                    disabled={checkingCloud}
+                    className="inline-flex min-h-[48px] w-full cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-white/15 bg-white/8 px-4 text-sm font-bold text-white transition hover:bg-white/14 active:scale-[0.98] disabled:cursor-wait disabled:opacity-60"
                   >
-                    <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                    Go Back
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openDestinationDirectly()}
-                    className="relative inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl border border-sky-400/50 bg-sky-500/18 px-4 text-sm font-bold text-sky-100 transition hover:bg-sky-500/28 active:scale-[0.98]"
-                  >
-                    <span className="sg-shimmer-sweep pointer-events-none absolute inset-y-0 w-14 bg-gradient-to-r from-transparent via-white/15 to-transparent" />
-                    Open Anyway
-                    <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                    <RefreshCw
+                      className={`h-4 w-4 ${checkingCloud ? "animate-spin" : ""}`}
+                      aria-hidden="true"
+                    />
+                    {checkingCloud ? "Checking..." : "Check Status"}
                   </button>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={resetToReady}
-                  className="min-h-[48px] w-full cursor-pointer rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10 active:scale-[0.98]"
-                >
-                  Done
-                </button>
+                <div className="flex w-full flex-col gap-2.5 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={handleCheckCloudStatus}
+                    disabled={checkingCloud}
+                    className="inline-flex min-h-[48px] flex-1 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-white/15 bg-white/8 px-4 text-sm font-bold text-white transition hover:bg-white/14 active:scale-[0.98] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <RefreshCw
+                      className={`h-4 w-4 ${checkingCloud ? "animate-spin" : ""}`}
+                      aria-hidden="true"
+                    />
+                    {checkingCloud ? "Checking..." : "Check Status"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetToReady}
+                    className="min-h-[48px] flex-1 cursor-pointer whitespace-nowrap rounded-xl border border-white/15 bg-white/5 px-5 text-sm font-semibold text-white transition hover:bg-white/10 active:scale-[0.98]"
+                  >
+                    Done
+                  </button>
+                </div>
               )}
             </div>
           )}
