@@ -41,10 +41,10 @@ export function AnimatedNumber({ value = 0, suffix = '', durationMs = 550 }) {
   );
 }
 
-export function MiniSparkline({ data = [], stroke = '#38BDF8', id = 'spark' }) {
+export function MiniSparkline({ data = [], stroke = '#2563EB', id = 'spark' }) {
   const points = Array.isArray(data) && data.length > 1 ? data : [0, ...(Array.isArray(data) ? data : [0]), 0];
   const width = 112;
-  const height = 34;
+  const height = 36;
   const padY = 4;
   const max = Math.max(1, ...points);
 
@@ -74,7 +74,7 @@ export function MiniSparkline({ data = [], stroke = '#38BDF8', id = 'spark' }) {
     >
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={stroke} stopOpacity="0.28" />
+          <stop offset="0%" stopColor={stroke} stopOpacity="0.2" />
           <stop offset="100%" stopColor={stroke} stopOpacity="0" />
         </linearGradient>
       </defs>
@@ -83,7 +83,7 @@ export function MiniSparkline({ data = [], stroke = '#38BDF8', id = 'spark' }) {
         d={linePath}
         fill="none"
         stroke={stroke}
-        strokeWidth="1.75"
+        strokeWidth="2"
         strokeLinecap="round"
         className="sg-path-draw"
       />
@@ -116,7 +116,7 @@ export function TimelineAreaChart({
 
   const chart = useMemo(() => {
     const width = 680;
-    const height = 230;
+    const height = 232;
     const padLeft = 36;
     const padRight = 18;
     const padTop = 18;
@@ -145,7 +145,24 @@ export function TimelineAreaChart({
       : '';
 
     const ticks = [0, Math.ceil(maxVal / 2), maxVal];
-    return { width, height, padLeft, padRight, padTop, padBottom, innerW, innerH, bottomY, maxVal, pts, totalLine, blockedLine, totalArea, blockedArea, ticks };
+    return {
+      width,
+      height,
+      padLeft,
+      padRight,
+      padTop,
+      padBottom,
+      innerW,
+      innerH,
+      bottomY,
+      maxVal,
+      pts,
+      totalLine,
+      blockedLine,
+      totalArea,
+      blockedArea,
+      ticks
+    };
   }, [series]);
 
   const activePoint = hoveredIdx !== null && chart.pts[hoveredIdx]
@@ -153,25 +170,29 @@ export function TimelineAreaChart({
     : chart.pts[chart.pts.length - 1] || null;
 
   return (
-    <section className="flex flex-col justify-between rounded-xl border border-white/[0.08] bg-[#101624] p-6 transition-colors hover:border-white/[0.14]">
+    <section className="flex flex-col justify-between rounded-xl border border-slate-200/90 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_10px_24px_-8px_rgba(15,23,42,0.08)]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">Threat &amp; Inspection Timeline</h2>
-          <p className="mt-0.5 text-xs text-slate-400">
+          <h2 className="font-display text-sm font-semibold text-slate-900">
+            Threat &amp; Inspection Timeline
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500">
             Hover across time buckets to inspect scans, blocked threats, and cleared links
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-lg border border-white/[0.08] bg-[#0B101B] p-0.5 text-[11px]">
+          <div className="inline-flex rounded-lg bg-slate-100 p-1 text-[11px]">
             <button
               type="button"
               onClick={() => {
                 setGranularity('daily');
                 setHoveredIdx(null);
               }}
-              className={`cursor-pointer rounded-md px-2.5 py-1 font-medium transition ${
-                granularity === 'daily' ? 'bg-white/[0.1] text-white' : 'text-slate-400 hover:text-slate-200'
+              className={`cursor-pointer rounded-md px-2.5 py-1 font-medium transition whitespace-nowrap ${
+                granularity === 'daily'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Daily
@@ -182,20 +203,24 @@ export function TimelineAreaChart({
                 setGranularity('hourly');
                 setHoveredIdx(null);
               }}
-              className={`cursor-pointer rounded-md px-2.5 py-1 font-medium transition ${
-                granularity === 'hourly' ? 'bg-white/[0.1] text-white' : 'text-slate-400 hover:text-slate-200'
+              className={`cursor-pointer rounded-md px-2.5 py-1 font-medium transition whitespace-nowrap ${
+                granularity === 'hourly'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               12h Hourly
             </button>
           </div>
 
-          <div className="inline-flex rounded-lg border border-white/[0.08] bg-[#0B101B] p-0.5 text-[11px]">
+          <div className="inline-flex rounded-lg bg-slate-100 p-1 text-[11px]">
             <button
               type="button"
               onClick={() => setChartMode('area')}
-              className={`cursor-pointer rounded-md px-2.5 py-1 font-medium transition ${
-                chartMode === 'area' ? 'bg-sky-500/20 text-sky-300' : 'text-slate-400 hover:text-slate-200'
+              className={`cursor-pointer rounded-md px-2.5 py-1 font-medium transition whitespace-nowrap ${
+                chartMode === 'area'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Spline Area
@@ -203,8 +228,10 @@ export function TimelineAreaChart({
             <button
               type="button"
               onClick={() => setChartMode('bars')}
-              className={`cursor-pointer rounded-md px-2.5 py-1 font-medium transition ${
-                chartMode === 'bars' ? 'bg-sky-500/20 text-sky-300' : 'text-slate-400 hover:text-slate-200'
+              className={`cursor-pointer rounded-md px-2.5 py-1 font-medium transition whitespace-nowrap ${
+                chartMode === 'bars'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Stacked Bars
@@ -214,28 +241,28 @@ export function TimelineAreaChart({
       </div>
 
       {/* Live readout strip */}
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-[#0B101B] px-3.5 py-2 text-xs">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200/80 bg-[#F8FAFC] px-3.5 py-2 text-xs">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono tabular-nums">
-          <span className="whitespace-nowrap text-slate-400">
-            Window: <strong className="text-slate-100">{activePoint ? activePoint.day : '—'}</strong>
+          <span className="whitespace-nowrap text-slate-500">
+            Window: <strong className="text-slate-900">{activePoint ? activePoint.day : '—'}</strong>
           </span>
-          <span className="whitespace-nowrap text-sky-400">
+          <span className="whitespace-nowrap text-blue-600">
             Total <strong>{activePoint?.total ?? 0}</strong>
           </span>
-          <span className="whitespace-nowrap text-rose-400">
+          <span className="whitespace-nowrap text-rose-600">
             Blocked <strong>{activePoint?.blocked ?? 0}</strong>
           </span>
-          <span className="whitespace-nowrap text-emerald-400">
+          <span className="whitespace-nowrap text-emerald-600">
             Safe <strong>{activePoint?.safe ?? 0}</strong>
           </span>
         </div>
-        <div className="flex items-center gap-3 text-[11px] text-slate-400">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm bg-sky-400" />
+        <div className="flex items-center gap-3 text-[11px] font-medium text-slate-600">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <span className="h-2.5 w-2.5 rounded-sm bg-blue-600" />
             Total Scans
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm bg-rose-500" />
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <span className="h-2.5 w-2.5 rounded-sm bg-rose-600" />
             Blocked
           </span>
         </div>
@@ -256,12 +283,12 @@ export function TimelineAreaChart({
           >
             <defs>
               <linearGradient id="sg-total-grad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#38BDF8" stopOpacity="0.32" />
-                <stop offset="100%" stopColor="#38BDF8" stopOpacity="0.01" />
+                <stop offset="0%" stopColor="#2563EB" stopOpacity="0.18" />
+                <stop offset="100%" stopColor="#2563EB" stopOpacity="0.01" />
               </linearGradient>
               <linearGradient id="sg-blocked-grad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#F43F5E" stopOpacity="0.38" />
-                <stop offset="100%" stopColor="#F43F5E" stopOpacity="0.02" />
+                <stop offset="0%" stopColor="#E11D48" stopOpacity="0.22" />
+                <stop offset="100%" stopColor="#E11D48" stopOpacity="0.01" />
               </linearGradient>
             </defs>
 
@@ -275,14 +302,14 @@ export function TimelineAreaChart({
                     y1={y}
                     x2={chart.width - chart.padRight}
                     y2={y}
-                    stroke="rgba(255,255,255,0.06)"
+                    stroke="#E2E8F0"
                     strokeDasharray="3 4"
                   />
                   <text
                     x={chart.padLeft - 8}
                     y={y + 4}
                     textAnchor="end"
-                    className="fill-slate-500 font-mono text-[10px]"
+                    className="fill-slate-400 font-mono text-[10px]"
                   >
                     {tickVal}
                   </text>
@@ -297,16 +324,16 @@ export function TimelineAreaChart({
                 <path
                   d={chart.totalLine}
                   fill="none"
-                  stroke="#38BDF8"
-                  strokeWidth="2.5"
+                  stroke="#2563EB"
+                  strokeWidth="2.6"
                   strokeLinecap="round"
                   className="sg-path-draw"
                 />
                 <path
                   d={chart.blockedLine}
                   fill="none"
-                  stroke="#F43F5E"
-                  strokeWidth="2.2"
+                  stroke="#E11D48"
+                  strokeWidth="2.25"
                   strokeLinecap="round"
                   className="sg-path-draw"
                 />
@@ -317,7 +344,7 @@ export function TimelineAreaChart({
                     y1={chart.padTop}
                     x2={activePoint.x}
                     y2={chart.bottomY}
-                    stroke="rgba(56, 189, 248, 0.35)"
+                    stroke="#94A3B8"
                     strokeWidth="1"
                     strokeDasharray="3 3"
                   />
@@ -330,9 +357,9 @@ export function TimelineAreaChart({
                       <circle
                         cx={pt.x}
                         cy={pt.totalY}
-                        r={isActive ? 5.5 : 3}
-                        fill="#0B101B"
-                        stroke="#38BDF8"
+                        r={isActive ? 5.5 : 3.2}
+                        fill="#FFFFFF"
+                        stroke="#2563EB"
                         strokeWidth={isActive ? 2.5 : 2}
                         className="transition-all duration-150"
                       />
@@ -340,9 +367,9 @@ export function TimelineAreaChart({
                         <circle
                           cx={pt.x}
                           cy={pt.blockedY}
-                          r={isActive ? 5 : 2.5}
-                          fill="#F43F5E"
-                          stroke="#0B101B"
+                          r={isActive ? 5 : 2.8}
+                          fill="#E11D48"
+                          stroke="#FFFFFF"
                           strokeWidth="1.5"
                           className="transition-all duration-150"
                         />
@@ -360,15 +387,15 @@ export function TimelineAreaChart({
                 const isActive = activePoint?.idx === pt.idx;
 
                 return (
-                  <g key={pt.day} opacity={hoveredIdx !== null && !isActive ? 0.55 : 1}>
+                  <g key={pt.day} opacity={hoveredIdx !== null && !isActive ? 0.45 : 1}>
                     {safeH > 0 && (
                       <rect
                         x={pt.x - barW / 2}
                         y={chart.bottomY - blockedH - holdSuspH - safeH}
                         width={barW}
                         height={safeH}
-                        rx="2"
-                        fill="#34D399"
+                        rx="3"
+                        fill="#059669"
                         className="sg-bar-grow"
                       />
                     )}
@@ -378,8 +405,8 @@ export function TimelineAreaChart({
                         y={chart.bottomY - blockedH - holdSuspH}
                         width={barW}
                         height={holdSuspH}
-                        rx="2"
-                        fill="#38BDF8"
+                        rx="3"
+                        fill="#0284C7"
                         className="sg-bar-grow"
                       />
                     )}
@@ -389,8 +416,8 @@ export function TimelineAreaChart({
                         y={chart.bottomY - blockedH}
                         width={barW}
                         height={blockedH}
-                        rx="2"
-                        fill="#F43F5E"
+                        rx="3"
+                        fill="#E11D48"
                         className="sg-bar-grow"
                       />
                     )}
@@ -411,7 +438,7 @@ export function TimelineAreaChart({
                       y={chart.height - 8}
                       textAnchor="middle"
                       className={`font-mono text-[10px] ${
-                        activePoint?.idx === idx ? 'fill-sky-300 font-semibold' : 'fill-slate-500'
+                        activePoint?.idx === idx ? 'fill-blue-700 font-semibold' : 'fill-slate-400'
                       }`}
                     >
                       {pt.label}
@@ -445,10 +472,10 @@ export function VerdictDonutChart({ insights, onSelectDecision }) {
 
   const segments = useMemo(
     () => [
-      { id: 'BLOCK', label: 'Blocked', count: insights.blocked, color: '#F43F5E', text: 'text-rose-400' },
-      { id: 'SUSPICIOUS', label: 'Suspicious', count: insights.suspicious, color: '#FBBF24', text: 'text-amber-400' },
-      { id: 'HOLD', label: 'Hold', count: insights.hold, color: '#38BDF8', text: 'text-sky-400' },
-      { id: 'SAFE', label: 'Safe / Cleared', count: insights.safe, color: '#34D399', text: 'text-emerald-400' }
+      { id: 'BLOCK', label: 'Blocked', count: insights.blocked, color: '#E11D48', text: 'text-rose-600' },
+      { id: 'SUSPICIOUS', label: 'Suspicious', count: insights.suspicious, color: '#D97706', text: 'text-amber-600' },
+      { id: 'HOLD', label: 'Hold', count: insights.hold, color: '#0284C7', text: 'text-sky-600' },
+      { id: 'SAFE', label: 'Safe / Cleared', count: insights.safe, color: '#059669', text: 'text-emerald-600' }
     ],
     [insights]
   );
@@ -474,13 +501,13 @@ export function VerdictDonutChart({ insights, onSelectDecision }) {
   const activePct = activeSlice && total > 0 ? Math.round((activeSlice.count / total) * 100) : null;
 
   return (
-    <section className="flex flex-col justify-between rounded-xl border border-white/[0.08] bg-[#101624] p-6 transition-colors hover:border-white/[0.14]">
+    <section className="flex flex-col justify-between rounded-xl border border-slate-200/90 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_10px_24px_-8px_rgba(15,23,42,0.08)]">
       <div className="flex items-baseline justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">Verdict Ring</h2>
-          <p className="mt-0.5 text-xs text-slate-400">Click any segment to filter queue</p>
+          <h2 className="font-display text-sm font-semibold text-slate-900">Verdict Ring</h2>
+          <p className="mt-0.5 text-xs text-slate-500">Click any segment to filter queue</p>
         </div>
-        <span className="font-mono text-xs text-slate-400 tabular-nums">{total} total</span>
+        <span className="font-mono text-xs font-medium text-slate-500 tabular-nums">{total} total</span>
       </div>
 
       <div className="my-5 flex items-center justify-center">
@@ -491,7 +518,7 @@ export function VerdictDonutChart({ insights, onSelectDecision }) {
               cy="80"
               r={radius}
               fill="none"
-              stroke="rgba(255,255,255,0.06)"
+              stroke="#F1F5F9"
               strokeWidth="16"
             />
             {arcSlices.map((slice) => {
@@ -508,7 +535,7 @@ export function VerdictDonutChart({ insights, onSelectDecision }) {
                   strokeDasharray={`${Math.max(0, slice.len - 2)} ${circumference}`}
                   strokeDashoffset={slice.dashOffset}
                   strokeLinecap="butt"
-                  opacity={hoveredId && !isHovered ? 0.4 : 1}
+                  opacity={hoveredId && !isHovered ? 0.35 : 1}
                   className="cursor-pointer transition-all duration-200"
                   onMouseEnter={() => setHoveredId(slice.id)}
                   onMouseLeave={() => setHoveredId(null)}
@@ -519,13 +546,13 @@ export function VerdictDonutChart({ insights, onSelectDecision }) {
           </svg>
 
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-            <span className="text-[11px] font-medium text-slate-400">
+            <span className="text-[11px] font-medium text-slate-500">
               {activeSlice ? activeSlice.label : 'All Events'}
             </span>
-            <span className="mt-0.5 font-mono text-2xl font-semibold text-slate-50 tabular-nums">
+            <span className="mt-0.5 font-mono text-2xl font-bold text-slate-900 tabular-nums">
               {activeSlice ? activeSlice.count : total}
             </span>
-            <span className="font-mono text-[11px] text-slate-400 tabular-nums">
+            <span className="font-mono text-[11px] text-slate-500 tabular-nums">
               {activeSlice ? `${activePct}% share` : `${insights.blocked} blocked`}
             </span>
           </div>
@@ -545,11 +572,11 @@ export function VerdictDonutChart({ insights, onSelectDecision }) {
               onClick={() => onSelectDecision?.(seg.id)}
               className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition ${
                 active
-                  ? 'border-white/[0.2] bg-white/[0.06]'
-                  : 'border-white/[0.06] bg-[#0B101B] hover:border-white/[0.14]'
+                  ? 'border-slate-300 bg-slate-100/80'
+                  : 'border-slate-200/80 bg-[#F8FAFC] hover:border-slate-300 hover:bg-slate-100/60'
               }`}
             >
-              <span className="flex min-w-0 items-center gap-2 text-xs font-medium text-slate-300">
+              <span className="flex min-w-0 items-center gap-2 text-xs font-medium text-slate-700">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: seg.color }} />
                 <span className="truncate">{seg.label}</span>
               </span>
@@ -569,22 +596,22 @@ export function RiskDistributionChart({ riskBuckets = [], onSelectRiskBand }) {
   const maxCount = Math.max(1, ...riskBuckets.map((b) => b.count));
 
   return (
-    <section className="flex flex-col justify-between rounded-xl border border-white/[0.08] bg-[#101624] p-6 transition-colors hover:border-white/[0.14]">
+    <section className="flex h-full flex-col justify-between rounded-xl border border-slate-200/90 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_10px_24px_-8px_rgba(15,23,42,0.08)]">
       <div className="flex items-baseline justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">Risk Score Spectrum</h2>
-          <p className="mt-0.5 text-xs text-slate-400">Distribution of 0–100 threat scores</p>
+          <h2 className="font-display text-sm font-semibold text-slate-900">Risk Score Spectrum</h2>
+          <p className="mt-0.5 text-xs text-slate-500">Distribution of 0–100 threat scores</p>
         </div>
         {hoveredBucket && (
-          <span className="font-mono text-xs text-slate-300 tabular-nums">
+          <span className="font-mono text-xs font-medium text-slate-700 tabular-nums">
             {hoveredBucket.label}: {hoveredBucket.count} events
           </span>
         )}
       </div>
 
-      <div className="mt-6 grid h-48 grid-cols-4 items-end gap-3 border-b border-white/[0.07] pb-3">
+      <div className="mt-6 grid h-48 grid-cols-4 items-end gap-3 border-b border-slate-200/80 pb-3">
         {riskBuckets.map((bucket) => {
-          const heightPct = bucket.count > 0 ? Math.max(12, Math.round((bucket.count / maxCount) * 100)) : 4;
+          const heightPct = bucket.count > 0 ? Math.max(14, Math.round((bucket.count / maxCount) * 100)) : 5;
           const isHovered = hoveredBucket?.id === bucket.id;
           return (
             <button
@@ -596,22 +623,22 @@ export function RiskDistributionChart({ riskBuckets = [], onSelectRiskBand }) {
               aria-label={`Filter risk score band ${bucket.label} (${bucket.count} events)`}
               className="group flex h-full cursor-pointer flex-col items-center justify-end gap-1.5 text-center"
             >
-              <span className="font-mono text-xs font-semibold text-slate-200 tabular-nums">
+              <span className="font-mono text-xs font-semibold text-slate-800 tabular-nums">
                 {bucket.count}
               </span>
-              <div className="flex h-32 w-full items-end justify-center rounded-lg bg-white/[0.03] px-2 pt-2">
+              <div className="flex h-32 w-full items-end justify-center rounded-lg bg-slate-100/90 px-2 pt-2 transition-colors group-hover:bg-slate-200/60">
                 <div
                   style={{
                     height: `${heightPct}%`,
                     backgroundColor: bucket.color,
-                    opacity: bucket.count > 0 ? (isHovered ? 1 : 0.85) : 0.2
+                    opacity: bucket.count > 0 ? (isHovered ? 1 : 0.88) : 0.22
                   }}
                   className="sg-bar-grow w-full max-w-[42px] rounded-t-md transition-opacity"
                 />
               </div>
               <div className="space-y-0.5">
-                <div className="font-mono text-[11px] font-medium text-slate-300">{bucket.label}</div>
-                <div className="text-[10px] text-slate-500">{bucket.hint}</div>
+                <div className="font-mono text-[11px] font-semibold text-slate-700">{bucket.label}</div>
+                <div className="text-[10px] font-medium text-slate-500">{bucket.hint}</div>
               </div>
             </button>
           );
@@ -623,13 +650,17 @@ export function RiskDistributionChart({ riskBuckets = [], onSelectRiskBand }) {
 
 export function SecurityChecksChart({ checkBreakdown = [] }) {
   return (
-    <section className="rounded-xl border border-white/[0.08] bg-[#101624] p-6 transition-colors hover:border-white/[0.14]">
+    <section className="h-full rounded-xl border border-slate-200/90 bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,0.04)] transition-shadow hover:shadow-[0_10px_24px_-8px_rgba(15,23,42,0.08)]">
       <div className="flex items-baseline justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">On-Device Verification Layer Health</h2>
-          <p className="mt-0.5 text-xs text-slate-400">Pass vs Flagged/Failed rates across local checks</p>
+          <h2 className="font-display text-sm font-semibold text-slate-900">
+            On-Device Verification Layer Health
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Pass vs Flagged/Failed rates across local checks
+          </p>
         </div>
-        <span className="font-mono text-xs text-slate-500 tabular-nums">
+        <span className="font-mono text-xs font-medium text-slate-500 tabular-nums">
           {checkBreakdown.length} layers active
         </span>
       </div>
@@ -646,25 +677,25 @@ export function SecurityChecksChart({ checkBreakdown = [] }) {
             return (
               <div key={ck.key}>
                 <div className="flex items-center justify-between gap-3 text-xs">
-                  <span className="truncate font-medium text-slate-200">{ck.label}</span>
-                  <span className="shrink-0 font-mono text-[11px] text-slate-400 tabular-nums">
-                    <span className="text-emerald-400">{ck.passed} passed</span>
+                  <span className="truncate font-semibold text-slate-800">{ck.label}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-slate-500 tabular-nums">
+                    <span className="font-medium text-emerald-600">{ck.passed} passed</span>
                     {ck.failed + ck.flagged > 0 && (
-                      <span className="text-rose-400"> · {ck.failed + ck.flagged} flagged/failed</span>
+                      <span className="font-medium text-rose-600"> · {ck.failed + ck.flagged} flagged/failed</span>
                     )}
                   </span>
                 </div>
-                <div className="mt-1.5 flex h-2 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                <div className="mt-1.5 flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
                   {passPct > 0 && (
                     <div
                       style={{ width: `${passPct}%` }}
-                      className="sg-bar-grow-x h-full bg-emerald-400/85"
+                      className="sg-bar-grow-x h-full bg-emerald-500"
                     />
                   )}
                   {failPct > 0 && (
                     <div
                       style={{ width: `${failPct}%` }}
-                      className="sg-bar-grow-x h-full bg-rose-500/90"
+                      className="sg-bar-grow-x h-full bg-rose-500"
                     />
                   )}
                 </div>
@@ -685,17 +716,17 @@ export function ScoreRadialGauge({ score = 0, decision = 'HOLD' }) {
   const upper = String(decision || '').toUpperCase();
   const color =
     upper === 'BLOCK' || clamped >= 75
-      ? '#F43F5E'
+      ? '#E11D48'
       : upper === 'SUSPICIOUS' || clamped >= 50
-        ? '#FBBF24'
+        ? '#D97706'
         : upper === 'HOLD'
-          ? '#38BDF8'
-          : '#34D399';
+          ? '#0284C7'
+          : '#059669';
 
   return (
     <div className="relative flex h-14 w-14 shrink-0 items-center justify-center" title={`Risk score ${clamped}/100`}>
       <svg viewBox="0 0 56 56" className="h-full w-full -rotate-90" aria-hidden="true">
-        <circle cx="28" cy="28" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="5" />
+        <circle cx="28" cy="28" r={r} fill="none" stroke="#E2E8F0" strokeWidth="5" />
         <circle
           cx="28"
           cy="28"
@@ -708,7 +739,7 @@ export function ScoreRadialGauge({ score = 0, decision = 'HOLD' }) {
           strokeLinecap="round"
         />
       </svg>
-      <span className="absolute font-mono text-xs font-semibold text-slate-100 tabular-nums">
+      <span className="absolute font-mono text-xs font-bold text-slate-900 tabular-nums">
         {clamped}
       </span>
     </div>

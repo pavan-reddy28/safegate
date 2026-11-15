@@ -61,11 +61,11 @@ export function EventsTableView({
 
   return (
     <div className="sg-animate-enter space-y-4">
-      <div className="flex flex-col gap-3 rounded-xl border border-white/[0.08] bg-[#101624] p-4">
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200/90 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative flex-1">
             <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
               aria-hidden="true"
             />
             <label htmlFor="events-search-input" className="sr-only">
@@ -77,7 +77,7 @@ export function EventsTableView({
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search requestId, Vivo V2355, host, reason code..."
-              className="h-10 w-full rounded-lg border border-white/[0.1] bg-[#0B101B] pl-9 pr-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-sky-400/70"
+              className="h-10 w-full rounded-lg border border-slate-200 bg-[#F8FAFC] pl-9 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-600/15"
             />
           </div>
 
@@ -89,7 +89,7 @@ export function EventsTableView({
               id="device-filter-select"
               value={deviceFilter}
               onChange={(e) => onDeviceFilterChange(e.target.value)}
-              className="h-10 cursor-pointer rounded-lg border border-white/[0.1] bg-[#0B101B] px-3 text-xs font-medium text-slate-200 outline-none focus:border-sky-400/70"
+              className="h-10 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-800 outline-none transition focus:border-blue-600"
             >
               <option value="ALL">All Devices ({devices.length})</option>
               {devices.map((dev) => (
@@ -106,7 +106,7 @@ export function EventsTableView({
               id="status-filter-select"
               value={statusFilter}
               onChange={(e) => onStatusFilterChange(e.target.value)}
-              className="h-10 cursor-pointer rounded-lg border border-white/[0.1] bg-[#0B101B] px-3 text-xs font-medium text-slate-200 outline-none focus:border-sky-400/70"
+              className="h-10 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-800 outline-none transition focus:border-blue-600"
             >
               {STATUS_TABS.map((tab) => (
                 <option key={tab.id} value={tab.id}>
@@ -122,7 +122,7 @@ export function EventsTableView({
               id="risk-band-filter-select"
               value={riskBandFilter}
               onChange={(e) => onRiskBandFilterChange?.(e.target.value)}
-              className="h-10 cursor-pointer rounded-lg border border-white/[0.1] bg-[#0B101B] px-3 text-xs font-medium text-slate-200 outline-none focus:border-sky-400/70"
+              className="h-10 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-800 outline-none transition focus:border-blue-600"
             >
               {RISK_BANDS.map((band) => (
                 <option key={band.id} value={band.id}>
@@ -135,7 +135,7 @@ export function EventsTableView({
               type="button"
               onClick={handleDownloadCsv}
               disabled={events.length === 0}
-              className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.04] px-3.5 text-xs font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap shrink-0"
+              className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap shrink-0"
             >
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Export CSV</span>
@@ -143,8 +143,8 @@ export function EventsTableView({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] pt-3">
-          <div className="inline-flex flex-wrap gap-1 rounded-lg bg-[#0B101B] p-1">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+          <div className="inline-flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1">
             {DECISION_TABS.map((tab) => {
               const active = decisionFilter === tab.id;
               return (
@@ -152,10 +152,10 @@ export function EventsTableView({
                   key={tab.id}
                   type="button"
                   onClick={() => onDecisionFilterChange(tab.id)}
-                  className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-medium transition-all whitespace-nowrap shrink-0 ${
                     active
-                      ? 'bg-white/[0.1] text-white'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-white text-blue-700 font-semibold shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   {tab.label}
@@ -164,42 +164,42 @@ export function EventsTableView({
             })}
           </div>
 
-          <div className="font-mono text-xs text-slate-400 tabular-nums">
+          <div className="font-mono text-xs font-medium text-slate-500 tabular-nums">
             Showing {events.length} {events.length === 1 ? 'event' : 'events'}
           </div>
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#101624]">
+      <div className="overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
         {loading && events.length === 0 ? (
           <div className="space-y-2 p-4">
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-11 animate-pulse rounded-lg bg-white/[0.04]" />
+              <div key={i} className="h-11 animate-pulse rounded-lg bg-slate-100" />
             ))}
           </div>
         ) : events.length === 0 ? (
           <div className="px-6 py-14 text-center">
-            <p className="text-sm font-medium text-slate-300">No events match your current filters</p>
+            <p className="text-sm font-semibold text-slate-800">No events match your current filters</p>
             <p className="mt-1 text-xs text-slate-500">
               Try clearing the search query or switching verdict and device filters.
             </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] border-collapse text-left text-xs">
+            <table className="w-full min-w-[840px] border-collapse text-left text-xs">
               <thead>
-                <tr className="border-b border-white/[0.08] bg-[#0C111C] text-[11px] font-semibold text-slate-400">
-                  <th className="px-4 py-3">Time</th>
-                  <th className="px-4 py-3">Device</th>
-                  <th className="px-4 py-3">Verdict</th>
-                  <th className="px-4 py-3 text-right">Score</th>
-                  <th className="px-4 py-3">Host / Domain</th>
-                  <th className="px-4 py-3">Primary Reason</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                <tr className="border-b border-slate-200 bg-[#F8FAFC] text-[11px] font-semibold text-slate-500">
+                  <th className="py-3 pl-4 pr-2.5">Time</th>
+                  <th className="px-2.5 py-3">Device</th>
+                  <th className="px-2.5 py-3">Verdict</th>
+                  <th className="px-2.5 py-3 text-right">Score</th>
+                  <th className="px-2.5 py-3">Host / Domain</th>
+                  <th className="px-2.5 py-3">Primary Reason</th>
+                  <th className="px-2.5 py-3">Status</th>
+                  <th className="py-3 pl-2.5 pr-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/[0.06]">
+              <tbody className="divide-y divide-slate-100">
                 {events.map((ev) => {
                   const dec = getDecisionStyle(ev.decision);
                   const st = getStatusLabel(ev.status);
@@ -211,54 +211,54 @@ export function EventsTableView({
                     <tr
                       key={ev.requestId}
                       onClick={() => onOpenDetail(ev)}
-                      className="cursor-pointer transition-colors hover:bg-white/[0.03]"
+                      className="cursor-pointer transition-colors hover:bg-blue-50/40"
                     >
-                      <td className="px-4 py-3 font-mono text-slate-400 tabular-nums whitespace-nowrap">
+                      <td className="py-3 pl-4 pr-2.5 font-mono text-[11px] text-slate-600 tabular-nums whitespace-nowrap">
                         {formatEventTime(ev.eventTime)}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-slate-100 whitespace-nowrap">
+                      <td className="px-2.5 py-3">
+                        <div className="max-w-[130px] truncate font-semibold text-slate-900 whitespace-nowrap">
                           {ev.deviceName || 'Unlabeled Device'}
                         </div>
-                        <div className="max-w-[160px] truncate font-mono text-[11px] text-slate-500">
+                        <div className="max-w-[130px] truncate font-mono text-[11px] text-slate-500">
                           {ev.deviceId}
                         </div>
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
+                      <td className="px-2.5 py-3 whitespace-nowrap">
                         <span className={`font-semibold ${dec.textClass}`}>
                           {dec.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right font-mono font-semibold text-slate-200 tabular-nums whitespace-nowrap">
+                      <td className="px-2.5 py-3 text-right font-mono font-bold text-slate-900 tabular-nums whitespace-nowrap">
                         {ev.score}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="max-w-[180px] truncate font-mono text-slate-200">
+                      <td className="px-2.5 py-3">
+                        <div className="max-w-[150px] truncate font-mono text-slate-800">
                           {destLabel}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="max-w-[230px] truncate font-mono text-[11px] text-slate-300">
+                      <td className="px-2.5 py-3">
+                        <div className="max-w-[170px] truncate font-mono text-[11px] text-slate-600">
                           {topReason}
                         </div>
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className={`font-medium ${st.textClass}`}>
+                      <td className="px-2.5 py-3 whitespace-nowrap">
+                        <span className={`font-semibold ${st.textClass}`}>
                           {st.label}
                         </span>
                       </td>
                       <td
-                        className="px-4 py-3 text-right whitespace-nowrap"
+                        className="py-3 pl-2.5 pr-4 text-right whitespace-nowrap"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="inline-flex items-center gap-1.5">
+                        <div className="inline-flex items-center gap-1">
                           <button
                             type="button"
                             disabled={isBusy}
                             onClick={() => onQuickAction(ev, 'ALLOW')}
                             title="Approve and allow opening"
                             aria-label={`Allow ${ev.requestId}`}
-                            className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
+                            className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
                           >
                             <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
                             <span>Allow</span>
@@ -269,7 +269,7 @@ export function EventsTableView({
                             onClick={() => onQuickAction(ev, 'BLOCK')}
                             title="Enforce block"
                             aria-label={`Block ${ev.requestId}`}
-                            className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-rose-500/25 bg-rose-500/10 px-2 text-[11px] font-medium text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-50"
+                            className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
                           >
                             <ShieldBan className="h-3 w-3" aria-hidden="true" />
                             <span>Block</span>
@@ -278,7 +278,7 @@ export function EventsTableView({
                             type="button"
                             onClick={() => onOpenDetail(ev)}
                             aria-label={`Inspect ${ev.requestId}`}
-                            className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-white/[0.1] bg-white/[0.04] px-2 text-[11px] font-medium text-slate-200 transition hover:bg-white/[0.08]"
+                            className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-900"
                           >
                             <Eye className="h-3 w-3" aria-hidden="true" />
                             <span>Inspect</span>

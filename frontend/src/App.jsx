@@ -235,11 +235,22 @@ export default function App() {
     setActiveTab('events');
   };
 
+  const handleDrillDownDomain = (domain) => {
+    setSearch(domain || '');
+    setDecisionFilter('ALL');
+    setStatusFilter('ALL');
+    setRiskBandFilter('ALL');
+    if (insightsDeviceScope !== 'ALL') {
+      setDeviceFilter(insightsDeviceScope);
+    }
+    setActiveTab('events');
+  };
+
   if (initializing) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#090D16] text-slate-400">
-        <div className="flex items-center gap-3 text-sm">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+      <main className="flex min-h-screen items-center justify-center bg-[#F8FAFC] text-slate-600">
+        <div className="flex items-center gap-3 text-sm font-medium">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
           <span>Verifying SafeGate session...</span>
         </div>
       </main>
@@ -255,7 +266,7 @@ export default function App() {
     : 'Syncing';
 
   return (
-    <div className="flex min-h-screen bg-[#090D16] text-slate-100">
+    <div className="flex min-h-screen bg-[#F8FAFC] text-slate-900">
       <SidebarNav
         activeTab={activeTab}
         onSelectTab={setActiveTab}
@@ -273,18 +284,18 @@ export default function App() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-white/[0.08] bg-[#090D16]/90 px-4 backdrop-blur sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-slate-200/80 bg-white/90 px-4 backdrop-blur-md sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Open navigation menu"
-              className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-slate-300 hover:bg-white/[0.08] lg:hidden"
+              className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50 lg:hidden"
             >
               <Menu className="h-4 w-4" aria-hidden="true" />
             </button>
             <div className="min-w-0">
-              <h1 className="truncate text-base font-semibold tracking-tight text-slate-50 sm:text-lg">
+              <h1 className="font-display truncate text-base font-bold tracking-tight text-slate-900 sm:text-lg">
                 {TAB_TITLES[activeTab] || 'SafeGate Control'}
               </h1>
             </div>
@@ -299,7 +310,7 @@ export default function App() {
               onClick={loadAllEvents}
               disabled={eventsLoading}
               aria-label="Refresh security events"
-              className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 text-xs font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:opacity-60 whitespace-nowrap"
+              className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-[0_1px_2px_rgba(15,23,42,0.03)] transition hover:bg-slate-50 hover:text-slate-900 disabled:opacity-60 whitespace-nowrap"
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 ${eventsLoading ? 'animate-spin' : ''}`}
@@ -314,13 +325,13 @@ export default function App() {
           {eventsError && (
             <div
               role="alert"
-              className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs font-medium text-rose-200"
+              className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700"
             >
               <span>{eventsError}</span>
               <button
                 type="button"
                 onClick={() => setEventsError('')}
-                className="cursor-pointer text-rose-300 hover:text-white"
+                className="cursor-pointer font-semibold text-rose-800 hover:text-rose-950"
               >
                 Dismiss
               </button>
@@ -339,6 +350,7 @@ export default function App() {
               onDrillDownDecision={handleDrillDownDecision}
               onDrillDownDevice={handleDrillDownDevice}
               onDrillDownRiskBand={handleDrillDownRiskBand}
+              onDrillDownDomain={handleDrillDownDomain}
               onRefresh={loadAllEvents}
             />
           )}

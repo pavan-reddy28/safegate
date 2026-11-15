@@ -31,11 +31,11 @@ export function SidebarNav({
   };
 
   const content = (
-    <div className="flex h-full w-64 flex-col border-r border-white/[0.08] bg-[#0C111C]">
-      <div className="flex h-16 items-center justify-between border-b border-white/[0.08] px-5">
+    <div className="flex h-full w-64 flex-col border-r border-slate-200/90 bg-white">
+      <div className="flex h-16 items-center justify-between border-b border-slate-200/80 px-5">
         <div className="flex items-center gap-2.5">
           <LockerMark className="h-6 w-6 shrink-0" />
-          <span className="whitespace-nowrap text-base font-semibold tracking-tight text-slate-50">
+          <span className="font-display whitespace-nowrap text-base font-bold tracking-tight text-slate-900">
             SafeGate
           </span>
         </div>
@@ -44,7 +44,7 @@ export function SidebarNav({
             type="button"
             onClick={onCloseMobile}
             aria-label="Close navigation menu"
-            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.06] hover:text-slate-100 lg:hidden"
+            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 lg:hidden"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -62,16 +62,23 @@ export function SidebarNav({
               onClick={() => handleNavClick(item.id)}
               className={`flex h-10 w-full cursor-pointer items-center justify-between rounded-lg px-3 text-sm font-medium transition-colors whitespace-nowrap ${
                 active
-                  ? 'bg-white/[0.08] text-slate-50'
-                  : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'
+                  ? 'bg-blue-50 text-blue-700 font-semibold'
+                  : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
               }`}
             >
               <span className="flex items-center gap-2.5">
-                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <Icon
+                  className={`h-4 w-4 shrink-0 ${active ? 'text-blue-600' : 'text-slate-500'}`}
+                  aria-hidden="true"
+                />
                 <span>{item.label}</span>
               </span>
               {typeof item.count === 'number' && (
-                <span className="font-mono text-xs text-slate-400 tabular-nums">
+                <span
+                  className={`font-mono text-xs tabular-nums ${
+                    active ? 'text-blue-600 font-semibold' : 'text-slate-500'
+                  }`}
+                >
                   {item.count}
                 </span>
               )}
@@ -80,8 +87,8 @@ export function SidebarNav({
         })}
       </nav>
 
-      <div className="mt-2 flex-1 overflow-y-auto border-t border-white/[0.07] px-3 py-4">
-        <div className="px-3 text-xs font-medium text-slate-500">
+      <div className="mt-1 flex-1 overflow-y-auto border-t border-slate-100 px-3 py-4">
+        <div className="px-3 text-xs font-semibold text-slate-500">
           Connected Devices
         </div>
         {devices.length === 0 ? (
@@ -99,8 +106,8 @@ export function SidebarNav({
                   onClick={() => handleDeviceClick(dev.deviceId)}
                   className={`flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-left text-xs transition-colors ${
                     active
-                      ? 'bg-sky-500/15 text-sky-200'
-                      : 'text-slate-300 hover:bg-white/[0.04] hover:text-white'
+                      ? 'bg-blue-50 text-blue-700 font-semibold'
+                      : 'text-slate-700 hover:bg-slate-100/80 hover:text-slate-900'
                   }`}
                 >
                   <span className="min-w-0 truncate font-medium">
@@ -116,10 +123,10 @@ export function SidebarNav({
         )}
       </div>
 
-      <div className="border-t border-white/[0.08] p-4">
+      <div className="border-t border-slate-200/80 p-4">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-slate-100">
+            <div className="truncate text-sm font-semibold text-slate-900">
               {username}
             </div>
             <div className="text-xs text-slate-500">
@@ -130,7 +137,7 @@ export function SidebarNav({
             type="button"
             onClick={onLogout}
             aria-label="Sign out"
-            className="flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] hover:text-white whitespace-nowrap shrink-0"
+            className="flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap shrink-0"
           >
             <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Sign out</span>
@@ -146,11 +153,11 @@ export function SidebarNav({
       {mobileOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
           <div
-            className="fixed inset-0 bg-black/70"
+            className="fixed inset-0 bg-slate-900/35 backdrop-blur-[2px]"
             onClick={onCloseMobile}
             aria-hidden="true"
           />
-          <aside className="relative z-10 h-full">{content}</aside>
+          <aside className="relative z-10 h-full shadow-xl">{content}</aside>
         </div>
       )}
     </>

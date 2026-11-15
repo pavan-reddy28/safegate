@@ -10,44 +10,44 @@ export function getDecisionStyle(decision) {
     case 'BLOCK':
       return {
         label: 'Blocked',
-        textClass: 'text-rose-400',
-        dotClass: 'bg-rose-500',
-        barClass: 'bg-rose-500',
-        hex: '#F43F5E'
+        textClass: 'text-rose-600',
+        dotClass: 'bg-rose-600',
+        barClass: 'bg-rose-600',
+        hex: '#E11D48'
       };
     case 'SUSPICIOUS':
       return {
         label: 'Suspicious',
-        textClass: 'text-amber-400',
-        dotClass: 'bg-amber-400',
-        barClass: 'bg-amber-400',
-        hex: '#FBBF24'
+        textClass: 'text-amber-600',
+        dotClass: 'bg-amber-500',
+        barClass: 'bg-amber-500',
+        hex: '#D97706'
       };
     case 'HOLD':
       return {
         label: 'Hold',
-        textClass: 'text-sky-400',
-        dotClass: 'bg-sky-400',
-        barClass: 'bg-sky-400',
-        hex: '#38BDF8'
+        textClass: 'text-sky-600',
+        dotClass: 'bg-sky-600',
+        barClass: 'bg-sky-600',
+        hex: '#0284C7'
       };
     case 'SAFE':
     case 'KNOWN_SAFE':
     case 'NO_KNOWN_THREAT':
       return {
         label: d === 'KNOWN_SAFE' ? 'Known Safe' : d === 'NO_KNOWN_THREAT' ? 'Cleared' : 'Safe',
-        textClass: 'text-emerald-400',
-        dotClass: 'bg-emerald-400',
-        barClass: 'bg-emerald-400',
-        hex: '#34D399'
+        textClass: 'text-emerald-600',
+        dotClass: 'bg-emerald-600',
+        barClass: 'bg-emerald-600',
+        hex: '#059669'
       };
     default:
       return {
         label: d,
-        textClass: 'text-slate-300',
-        dotClass: 'bg-slate-400',
-        barClass: 'bg-slate-400',
-        hex: '#94A3B8'
+        textClass: 'text-slate-700',
+        dotClass: 'bg-slate-500',
+        barClass: 'bg-slate-500',
+        hex: '#475569'
       };
   }
 }
@@ -56,13 +56,13 @@ export function getStatusLabel(status) {
   const s = String(status || 'OPEN').toUpperCase();
   switch (s) {
     case 'RESOLVED':
-      return { label: 'Resolved', textClass: 'text-emerald-400' };
+      return { label: 'Resolved', textClass: 'text-emerald-700' };
     case 'REVIEWED':
-      return { label: 'Reviewed', textClass: 'text-sky-400' };
+      return { label: 'Reviewed', textClass: 'text-sky-700' };
     case 'ARCHIVED':
-      return { label: 'Archived', textClass: 'text-slate-400' };
+      return { label: 'Archived', textClass: 'text-slate-500' };
     default:
-      return { label: 'Open', textClass: 'text-amber-300' };
+      return { label: 'Open', textClass: 'text-amber-700' };
   }
 }
 
@@ -96,7 +96,8 @@ function formatCheckLabel(key) {
   return String(key || '')
     .replace(/Check$/, '')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/^./, (c) => c.toUpperCase());
+    .replace(/^./, (c) => c.toUpperCase())
+    .replace(/\b(Ml|Tls|Url|Dns)\b/g, (word) => word.toUpperCase());
 }
 
 export function filterEventsByRangeAndDevice(events = [], { range = 'ALL', deviceId = 'ALL', nowMs = Date.now() } = {}) {
@@ -143,10 +144,10 @@ export function computeDashboardInsights(events = [], options = {}) {
   const checkMap = new Map();
 
   const riskBuckets = [
-    { id: '0-20', label: '0–20', hint: 'Low', min: 0, max: 20, count: 0, color: '#34D399' },
-    { id: '21-49', label: '21–49', hint: 'Moderate', min: 21, max: 49, count: 0, color: '#38BDF8' },
-    { id: '50-74', label: '50–74', hint: 'Elevated', min: 50, max: 74, count: 0, color: '#FBBF24' },
-    { id: '75-100', label: '75–100', hint: 'Critical', min: 75, max: 100, count: 0, color: '#F43F5E' }
+    { id: '0-20', label: '0–20', hint: 'Low', min: 0, max: 20, count: 0, color: '#059669' },
+    { id: '21-49', label: '21–49', hint: 'Moderate', min: 21, max: 49, count: 0, color: '#0284C7' },
+    { id: '50-74', label: '50–74', hint: 'Elevated', min: 50, max: 74, count: 0, color: '#D97706' },
+    { id: '75-100', label: '75–100', hint: 'Critical', min: 75, max: 100, count: 0, color: '#E11D48' }
   ];
 
   // Always compute connected device inventory across allEvents so device selector never loses devices
