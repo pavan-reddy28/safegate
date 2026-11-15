@@ -235,3 +235,190 @@ test("End-to-end cloud block -> operator unblock -> re-block overrides work via 
     globalThis.__SAFEGATE_TEST_ENV__ = originalEnv;
   }
 });
+
+test("Real client offlineEngine + cloudSync matrix inserts 201 across all verdicts into real platform createApp HTTP server and supports hard DELETE", async () => {
+  const crypto = require("node:crypto");
+  const http = require("node:http");
+  const { createApp } = require("../platform/backend/src/app.js");
+  const { createApiTokenStore } = require("../platform/backend/src/api-token-store.js");
+  const { analyzeUrlOffline } = await import("../src/security/offlineEngine.js");
+  const { buildPrivacySafeCloudPayload, createSignedProofToken } = await import("../src/security/cloudSync.js");
+
+  const events = new Map();
+  const consumedProofs = new Map();
+  const adminActions = [];
+  const db = {
+    pragma: () => [{ quick_check: "ok" }],
+    transaction: (fn) => () => fn(),
+    prepare(sql) {
+      return {
+        run(...args) {
+          if (sql.includes("INSERT INTO consumed_proof_tokens")) {
+            if (consumedProofs.has(args[0])) {
+              const err = new Error("UNIQUE constraint failed: consumed_proof_tokens.jti");
+              err.code = "SQLITE_CONSTRAINT_PRIMARYKEY";
+              throw err;
+            }
+            consumedProofs.set(args[0], { requestId: args[1], expiresAt: args[4] });
+            return { changes: 1 };
+          }
+          if (sql.includes("INSERT INTO admin_actions")) {
+            adminActions.push({ requestId: args[0], action: args[3] });
+            return { changes: 1 };
+          }
+          if (sql.includes("INSERT INTO security_events")) {
+            events.set(args[0], {
+              request_id: args[0],
+              device_id: args[1],
+              event_time: args[2],
+              decision: args[3],
+              score: args[4],
+              reasons_json: args[5],
+              status: "OPEN",
+              verification_status: args[6],
+              local_decision: args[7],
+              stage: args[8],
+              recommended_action: args[9],
+              destination_host: args[10],
+              registrable_domain: args[11],
+              protocol: args[12],
+              indicators_json: args[13],
+              security_checks_json: args[14],
+              url_inspection_json: args[15],
+              risk_level: args[16],
+              layers_executed_count: args[17],
+              zero_egress: args[18],
+              proof_jti: args[19],
+              payload_hash: args[20],
+              app_version: args[21],
+              operator_notes: null,
+              created_at: args[22],
+              updated_at: args[23]
+            });
+            return { changes: 1 };
+          }
+          if (sql.includes("DELETE FROM security_events")) {
+            return { changes: events.delete(args[0]) ? 1 : 0 };
+          }
+          return { changes: 1 };
+        },
+        get(...args) {
+          if (sql.includes("FROM security_events")) return events.get(args[0]);
+          return undefined;
+        },
+        all() {
+          return [...events.values()];
+        }
+      };
+    }
+  };
+
+  const apiTokenStore = createApiTokenStore();
+  const vaultToken = "b2".repeat(32);
+  apiTokenStore.set("1h", vaultToken, new Date(Date.now() + 600000));
+
+  const appIngestAuth = {
+    matches(candidate) {
+      return typeof candidate === "string" && candidate === TEST_APP_KEY;
+    }
+  };
+
+  const proofVerifier = createProofVerifier({
+    hmacSecret: TEST_PROOF_SECRET,
+    maxTtlSeconds: 300,
+    requirePayloadDigest: true,
+    allowedAppIds: [TEST_APP_ID]
+  });
+
+  const app = createApp({
+    db,
+    config: { eventProof: { requireAppHeader: true, allowedAppIds: [TEST_APP_ID] } },
+    logger: { info() {}, warn() {}, error() {}, fatal() {}, idle() {} },
+    apiTokenStore,
+    appIngestAuth,
+    proofVerifier
+  });
+
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  const { port } = server.address();
+
+  const request = (method, path, headers, body = null) =>
+    new Promise((resolve, reject) => {
+      const req = http.request({ hostname: "127.0.0.1", port, path, method, headers }, (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          resolve({ status: res.statusCode, json: JSON.parse(text), text });
+        });
+      });
+      req.on("error", reject);
+      if (body !== null) req.write(JSON.stringify(body));
+      req.end();
+    });
+
+  try {
+    const realUrls = [
+      "https://www.sbi.co.in/personal?otp=112233",
+      "https://1.1.1.1/dns-query",
+      "https://testsafebrowsing.appspot.com/s/phishing.html",
+      "https://sbi-kyc-update.xyz/amount-credited/claim?account=1234567890&otp=998877",
+      "https://evil.com/login%ZZ",
+      "http://192.168.1.25/login",
+      "https://bit.ly/3xFakeBankSms",
+      "https://example.org/docs/guide"
+    ];
+
+    let lastRequestId = null;
+    for (const rawUrl of realUrls) {
+      const localResult = analyzeUrlOffline(rawUrl);
+      const clientPayload = buildPrivacySafeCloudPayload(localResult, "sgdev-real-client-matrix-1");
+      clientPayload.verificationToken = await createSignedProofToken(
+        {
+          rawUrl,
+          requestId: clientPayload.requestId,
+          deviceId: clientPayload.deviceId,
+          decision: clientPayload.finalDecision,
+          score: clientPayload.riskSummary.score,
+          reasons: clientPayload.finalReasonCodes,
+          destinationHost: clientPayload.localVerification?.destination?.hostname || null,
+          layersExecutedCount: clientPayload.layersExecuted.length
+        },
+        {
+          platformUrl: `http://127.0.0.1:${port}`,
+          appIngestKey: TEST_APP_KEY,
+          proofSecret: TEST_PROOF_SECRET,
+          appId: TEST_APP_ID
+        }
+      );
+
+      const res = await request(
+        "POST",
+        "/api/v1/events",
+        {
+          "X-SafeGate-App": TEST_APP_ID,
+          "X-SafeGate-App-Key": TEST_APP_KEY,
+          "Content-Type": "application/json"
+        },
+        clientPayload
+      );
+      assert.equal(res.status, 201, `Expected 201 for ${rawUrl} (${localResult.finalDecision}): ${res.text}`);
+      assert.equal(events.has(clientPayload.requestId), true);
+      lastRequestId = clientPayload.requestId;
+    }
+
+    // Verify permanent hard DELETE (without ?archive=true) removes row completely from DB
+    assert.ok(lastRequestId);
+    const delRes = await request("DELETE", `/api/v1/events/${lastRequestId}`, {
+      Authorization: `Bearer ${vaultToken}`
+    });
+    assert.equal(delRes.status, 200);
+    assert.equal(delRes.json.deleted, true);
+    assert.equal(events.has(lastRequestId), false);
+    assert.ok(adminActions.some((a) => a.requestId === lastRequestId && a.action === "DELETE:PURGED"));
+    assert.ok(crypto.randomUUID().length > 10);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
