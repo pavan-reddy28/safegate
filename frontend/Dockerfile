@@ -1,5 +1,6 @@
 FROM node:24.22.2-bookworm-slim AS builder
 
+ENV NODE_OPTIONS="--max-old-space-size=512"
 WORKDIR /build
 
 COPY package.json ./
@@ -15,13 +16,8 @@ RUN npx vite build \
     && node --check bff/vault-client.js \
     && node --check bff/app.js \
     && node --check bff/server.js \
-    && node --test test/*.test.js
-
-FROM node:24.22.2-bookworm-slim AS prod-deps
-
-WORKDIR /deps
-COPY package.json ./
-RUN npm install --omit=dev --no-audit --no-fund \
+    && node --test test/*.test.js \
+    && npm prune --omit=dev \
     && npm cache clean --force
 
 FROM node:24.22.2-bookworm-slim
@@ -31,7 +27,7 @@ ENV PORT=4318
 
 WORKDIR /app
 
-COPY --from=prod-deps /deps/node_modules ./node_modules
+COPY --from=builder /build/node_modules ./node_modules
 COPY --from=builder /build/dist ./dist
 COPY package.json ./
 COPY bff ./bff
