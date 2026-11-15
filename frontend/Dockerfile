@@ -1,10 +1,10 @@
 FROM node:24.22.2-bookworm-slim AS builder
 
-ENV NODE_OPTIONS="--max-old-space-size=512"
+ENV NODE_OPTIONS="--max-old-space-size=384"
 WORKDIR /build
 
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
 COPY index.html vite.config.mjs ./
 COPY src ./src
