@@ -36,10 +36,14 @@ export default function App() {
   const [eventsError, setEventsError] = useState('');
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
 
+  const [insightsRange, setInsightsRange] = useState('ALL');
+  const [insightsDeviceScope, setInsightsDeviceScope] = useState('ALL');
+
   const [search, setSearch] = useState('');
   const [decisionFilter, setDecisionFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [deviceFilter, setDeviceFilter] = useState('ALL');
+  const [riskBandFilter, setRiskBandFilter] = useState('ALL');
 
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [busyRequestId, setBusyRequestId] = useState(null);
@@ -175,7 +179,16 @@ export default function App() {
     }
   };
 
-  const insights = useMemo(() => computeDashboardInsights(events), [events]);
+  const globalInsights = useMemo(() => computeDashboardInsights(events), [events]);
+
+  const scopedInsights = useMemo(
+    () =>
+      computeDashboardInsights(events, {
+        range: insightsRange,
+        deviceId: insightsDeviceScope
+      }),
+    [events, insightsRange, insightsDeviceScope]
+  );
 
   const filteredEvents = useMemo(
     () =>
@@ -183,9 +196,10 @@ export default function App() {
         search,
         decision: decisionFilter,
         status: statusFilter,
-        deviceId: deviceFilter
+        deviceId: deviceFilter,
+        riskBand: riskBandFilter
       }),
-    [events, search, decisionFilter, statusFilter, deviceFilter]
+    [events, search, decisionFilter, statusFilter, deviceFilter, riskBandFilter]
   );
 
   const selectedEvent = useMemo(
@@ -196,6 +210,10 @@ export default function App() {
   const handleDrillDownDecision = (decision) => {
     setDecisionFilter(decision || 'ALL');
     setStatusFilter('ALL');
+    setRiskBandFilter('ALL');
+    if (insightsDeviceScope !== 'ALL') {
+      setDeviceFilter(insightsDeviceScope);
+    }
     setActiveTab('events');
   };
 
@@ -203,6 +221,17 @@ export default function App() {
     setDeviceFilter(deviceId || 'ALL');
     setDecisionFilter('ALL');
     setStatusFilter('ALL');
+    setRiskBandFilter('ALL');
+    setActiveTab('events');
+  };
+
+  const handleDrillDownRiskBand = (band) => {
+    setRiskBandFilter(band || 'ALL');
+    setDecisionFilter('ALL');
+    setStatusFilter('ALL');
+    if (insightsDeviceScope !== 'ALL') {
+      setDeviceFilter(insightsDeviceScope);
+    }
     setActiveTab('events');
   };
 
@@ -230,10 +259,13 @@ export default function App() {
       <SidebarNav
         activeTab={activeTab}
         onSelectTab={setActiveTab}
-        devices={insights.devices}
+        devices={globalInsights.devices}
         selectedDeviceId={deviceFilter}
-        onSelectDevice={setDeviceFilter}
-        openQueueCount={insights.openQueue}
+        onSelectDevice={(id) => {
+          setRiskBandFilter('ALL');
+          setDeviceFilter(id);
+        }}
+        openQueueCount={globalInsights.openQueue}
         username={session.username || 'pavanreddy'}
         onLogout={handleLogout}
         mobileOpen={mobileMenuOpen}
@@ -297,10 +329,16 @@ export default function App() {
 
           {activeTab === 'insights' && (
             <InsightsView
-              insights={insights}
+              insights={scopedInsights}
+              totalStoredCount={events.length}
+              range={insightsRange}
+              onRangeChange={setInsightsRange}
+              scopeDeviceId={insightsDeviceScope}
+              onScopeDeviceChange={setInsightsDeviceScope}
               loading={eventsLoading}
               onDrillDownDecision={handleDrillDownDecision}
               onDrillDownDevice={handleDrillDownDevice}
+              onDrillDownRiskBand={handleDrillDownRiskBand}
               onRefresh={loadAllEvents}
             />
           )}
@@ -308,7 +346,7 @@ export default function App() {
           {activeTab === 'events' && (
             <EventsTableView
               events={filteredEvents}
-              devices={insights.devices}
+              devices={globalInsights.devices}
               loading={eventsLoading}
               search={search}
               onSearchChange={setSearch}
@@ -318,6 +356,8 @@ export default function App() {
               onStatusFilterChange={setStatusFilter}
               deviceFilter={deviceFilter}
               onDeviceFilterChange={setDeviceFilter}
+              riskBandFilter={riskBandFilter}
+              onRiskBandFilterChange={setRiskBandFilter}
               onOpenDetail={(ev) => setSelectedEventId(ev.requestId)}
               onQuickAction={handleQuickAction}
               busyRequestId={busyRequestId}
@@ -326,7 +366,7 @@ export default function App() {
 
           {activeTab === 'devices' && (
             <DevicesView
-              devices={insights.devices}
+              devices={globalInsights.devices}
               onInspectDeviceEvents={handleDrillDownDevice}
             />
           )}

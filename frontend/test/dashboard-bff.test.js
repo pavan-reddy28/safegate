@@ -172,6 +172,11 @@ test('Insights analytics, filtering, and CSV formula sanitization behave determi
       status: 'OPEN',
       reasons: ['BRAND_DOMAIN_SPOOFED_IN_SUBDOMAIN'],
       indicators: ['NON_STANDARD_PORT'],
+      securityChecks: {
+        zeroEgressGuaranteed: true,
+        homographAndBrandSpoofCheck: 'FAILED',
+        malwareAndPathCheck: 'PASSED'
+      },
       zeroEgress: true,
       notes: '=CMD|calc'
     },
@@ -185,6 +190,11 @@ test('Insights analytics, filtering, and CSV formula sanitization behave determi
       status: 'RESOLVED',
       reasons: ['KNOWN_SAFE'],
       indicators: [],
+      securityChecks: {
+        zeroEgressGuaranteed: true,
+        homographAndBrandSpoofCheck: 'PASSED',
+        malwareAndPathCheck: 'PASSED'
+      },
       zeroEgress: true
     }
   ];
@@ -196,10 +206,23 @@ test('Insights analytics, filtering, and CSV formula sanitization behave determi
   assert.equal(stats.openQueue, 1);
   assert.equal(stats.uniqueDevices, 2);
   assert.equal(stats.devices[0].deviceName, 'Vivo V2355');
+  assert.ok(stats.dailyActivity.length >= 7);
+  assert.equal(stats.hourlyActivity.length, 12);
+  assert.equal(stats.riskBuckets.find((b) => b.id === '75-100').count, 1);
+  assert.equal(stats.riskBuckets.find((b) => b.id === '0-20').count, 1);
+  assert.equal(stats.checkBreakdown.find((c) => c.key === 'homographAndBrandSpoofCheck').failed, 1);
+
+  const scoped = insightsMod.computeDashboardInsights(sampleEvents, { deviceId: 'sgdev-1' });
+  assert.equal(scoped.total, 1);
+  assert.equal(scoped.blocked, 1);
 
   const filtered = insightsMod.filterEvents(sampleEvents, { search: 'vivo v2355' });
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].requestId, 'req-1');
+
+  const critOnly = insightsMod.filterEvents(sampleEvents, { riskBand: '75-100' });
+  assert.equal(critOnly.length, 1);
+  assert.equal(critOnly[0].requestId, 'req-1');
 
   const csv = insightsMod.exportEventsToCsv(sampleEvents);
   assert.ok(csv.includes("'=CMD|calc"));

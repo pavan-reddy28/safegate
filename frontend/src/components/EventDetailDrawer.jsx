@@ -12,6 +12,7 @@ import {
   Save
 } from 'lucide-react';
 import { formatFullTimestamp, getDecisionStyle, getStatusLabel } from '../utils/insights.js';
+import { ScoreRadialGauge } from './InteractiveCharts.jsx';
 
 const DECISION_OPTIONS = ['BLOCK', 'SUSPICIOUS', 'HOLD', 'SAFE', 'KNOWN_SAFE', 'NO_KNOWN_THREAT'];
 const STATUS_OPTIONS = ['OPEN', 'REVIEWED', 'RESOLVED', 'ARCHIVED'];
@@ -136,33 +137,36 @@ export function EventDetailDrawer({
       />
       <aside
         aria-label="Event Details Inspector"
-        className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-white/[0.1] bg-[#0E1422] text-slate-100 shadow-2xl"
+        className="sg-drawer-enter relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-white/[0.1] bg-[#0E1422] text-slate-100 shadow-2xl"
       >
         <div className="flex items-center justify-between gap-4 border-b border-white/[0.08] px-6 py-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span className={`font-semibold ${decStyle.textClass}`}>{decStyle.label}</span>
-              <span aria-hidden="true">·</span>
-              <span className={statusStyle.textClass}>{statusStyle.label}</span>
-              <span aria-hidden="true">·</span>
-              <span className="font-mono tabular-nums">Score {event.score}</span>
-            </div>
-            <div className="mt-1 flex items-center gap-2">
-              <h2 className="truncate font-mono text-sm font-semibold text-white">
-                {event.requestId}
-              </h2>
-              <button
-                type="button"
-                onClick={handleCopyRequestId}
-                aria-label="Copy request ID"
-                className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-white/[0.1] bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
-              >
-                {copiedId ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-              </button>
+          <div className="flex min-w-0 items-center gap-3.5">
+            <ScoreRadialGauge score={event.score} decision={event.decision} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span className={`font-semibold ${decStyle.textClass}`}>{decStyle.label}</span>
+                <span aria-hidden="true">·</span>
+                <span className={statusStyle.textClass}>{statusStyle.label}</span>
+                <span aria-hidden="true">·</span>
+                <span className="font-mono tabular-nums">Score {event.score}/100</span>
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <h2 className="truncate font-mono text-sm font-semibold text-white">
+                  {event.requestId}
+                </h2>
+                <button
+                  type="button"
+                  onClick={handleCopyRequestId}
+                  aria-label="Copy request ID"
+                  className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-white/[0.1] bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
+                >
+                  {copiedId ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 

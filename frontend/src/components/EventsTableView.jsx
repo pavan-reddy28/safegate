@@ -22,6 +22,14 @@ const STATUS_TABS = [
   { id: 'ARCHIVED', label: 'Archived' }
 ];
 
+const RISK_BANDS = [
+  { id: 'ALL', label: 'Any Score' },
+  { id: '75-100', label: 'Score 75–100 (Critical)' },
+  { id: '50-74', label: 'Score 50–74 (Elevated)' },
+  { id: '21-49', label: 'Score 21–49 (Moderate)' },
+  { id: '0-20', label: 'Score 0–20 (Low)' }
+];
+
 export function EventsTableView({
   events,
   devices,
@@ -34,6 +42,8 @@ export function EventsTableView({
   onStatusFilterChange,
   deviceFilter,
   onDeviceFilterChange,
+  riskBandFilter = 'ALL',
+  onRiskBandFilterChange,
   onOpenDetail,
   onQuickAction,
   busyRequestId
@@ -50,7 +60,7 @@ export function EventsTableView({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="sg-animate-enter space-y-4">
       <div className="flex flex-col gap-3 rounded-xl border border-white/[0.08] bg-[#101624] p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative flex-1">
@@ -101,6 +111,22 @@ export function EventsTableView({
               {STATUS_TABS.map((tab) => (
                 <option key={tab.id} value={tab.id}>
                   {tab.label}
+                </option>
+              ))}
+            </select>
+
+            <label htmlFor="risk-band-filter-select" className="sr-only">
+              Filter by risk score band
+            </label>
+            <select
+              id="risk-band-filter-select"
+              value={riskBandFilter}
+              onChange={(e) => onRiskBandFilterChange?.(e.target.value)}
+              className="h-10 cursor-pointer rounded-lg border border-white/[0.1] bg-[#0B101B] px-3 text-xs font-medium text-slate-200 outline-none focus:border-sky-400/70"
+            >
+              {RISK_BANDS.map((band) => (
+                <option key={band.id} value={band.id}>
+                  {band.label}
                 </option>
               ))}
             </select>

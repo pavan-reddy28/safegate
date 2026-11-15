@@ -16,6 +16,93 @@
   }
 }
 
+@keyframes sgFadeSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sgDrawerSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes sgPathDraw {
+  from {
+    stroke-dashoffset: 1400;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes sgBarGrow {
+  from {
+    transform: scaleY(0);
+    opacity: 0.4;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes sgBarGrowX {
+  from {
+    transform: scaleX(0);
+    opacity: 0.5;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+.sg-animate-enter {
+  animation: sgFadeSlideUp 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sg-drawer-enter {
+  animation: sgDrawerSlideIn 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sg-path-draw {
+  stroke-dasharray: 1400;
+  stroke-dashoffset: 0;
+  animation: sgPathDraw 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sg-bar-grow {
+  transform-origin: bottom center;
+  animation: sgBarGrow 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sg-bar-grow-x {
+  transform-origin: left center;
+  animation: sgBarGrowX 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sg-animate-enter,
+  .sg-drawer-enter,
+  .sg-path-draw,
+  .sg-bar-grow,
+  .sg-bar-grow-x {
+    animation: none !important;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
