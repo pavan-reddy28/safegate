@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local secrets and browser verification artifacts
+.env
+.env.*
+!.env.example
+.playwright-cli/
+

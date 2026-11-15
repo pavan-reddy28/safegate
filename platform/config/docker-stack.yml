@@ -63,8 +63,70 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  dashboard:
+    image: safegate-dashboard:1.0.0
+    environment:
+      NODE_ENV: production
+      PORT: "4318"
+      PLATFORM_BASE_URL: "http://platform:4317"
+      ENV_FILE: /run/secrets/dashboard_env
+    secrets:
+      - source: dashboard_env_v1
+        target: dashboard_env
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+    networks:
+      - safegate_private
+      - safegate_azure_egress
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get('http://127.0.0.1:4318/ready', r => { r.resume(); process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 15s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == pavanreddyserver
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 192M
+        reservations:
+          cpus: "0.10"
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 secrets:
   platform_env_v3:
+    external: true
+  dashboard_env_v1:
     external: true
 
 networks:
