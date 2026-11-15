@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   platform:
-    image: safegate-platform:1.1.0
+    image: safegate-platform:1.2.1
     environment:
       NODE_ENV: production
       PORT: "4317"
