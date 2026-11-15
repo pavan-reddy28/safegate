@@ -8,6 +8,7 @@ const V2_EVENTS_SCHEMA = `
   CREATE TABLE IF NOT EXISTS security_events (
     request_id TEXT PRIMARY KEY,
     device_id TEXT NOT NULL,
+    device_name TEXT,
     event_time TEXT NOT NULL,
     decision TEXT NOT NULL
       CHECK(decision IN ('BLOCK', 'SUSPICIOUS', 'HOLD', 'SAFE', 'KNOWN_SAFE', 'NO_KNOWN_THREAT')),
@@ -58,20 +59,27 @@ function migrateSecurityEventsIfNeeded(db, logger) {
     columnNames.has('security_checks_json') &&
     columnNames.has('url_inspection_json') &&
     columnNames.has('operator_notes') &&
+    columnNames.has('device_name') &&
     tableSql.includes('KNOWN_SAFE');
 
   if (hasFullV2Schema) {
     return;
   }
 
-  // Lightweight additive migration if only operator_notes is missing on an existing v2 table
+  // Lightweight additive migration if operator_notes or device_name is missing on an existing v2 table
   if (
     columnNames.has('proof_jti') &&
     tableSql.includes('KNOWN_SAFE') &&
-    !columnNames.has('operator_notes')
+    (!columnNames.has('operator_notes') || !columnNames.has('device_name'))
   ) {
-    logger.info('Adding operator_notes column to security_events');
-    db.exec('ALTER TABLE security_events ADD COLUMN operator_notes TEXT;');
+    if (!columnNames.has('operator_notes')) {
+      logger.info('Adding operator_notes column to security_events');
+      db.exec('ALTER TABLE security_events ADD COLUMN operator_notes TEXT;');
+    }
+    if (!columnNames.has('device_name')) {
+      logger.info('Adding device_name column to security_events');
+      db.exec('ALTER TABLE security_events ADD COLUMN device_name TEXT;');
+    }
     return;
   }
 
@@ -141,11 +149,18 @@ function initializeDatabase(config, logger) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS devices (
       device_id TEXT PRIMARY KEY,
+      device_name TEXT,
       status TEXT NOT NULL DEFAULT 'ACTIVE',
       first_seen_at TEXT NOT NULL,
       last_seen_at TEXT NOT NULL
     );
   `);
+
+  const deviceColumns = db.prepare('PRAGMA table_info(devices)').all();
+  if (deviceColumns && !deviceColumns.some(col => col.name === 'device_name')) {
+    logger.info('Adding device_name column to devices');
+    db.exec('ALTER TABLE devices ADD COLUMN device_name TEXT;');
+  }
 
   migrateSecurityEventsIfNeeded(db, logger);
 
@@ -187,6 +202,9 @@ function initializeDatabase(config, logger) {
 
     CREATE INDEX IF NOT EXISTS idx_events_device
       ON security_events(device_id);
+
+    CREATE INDEX IF NOT EXISTS idx_events_device_name
+      ON security_events(device_name);
 
     CREATE INDEX IF NOT EXISTS idx_events_decision
       ON security_events(decision);

@@ -1,8 +1,12 @@
+import { getNativeHardwareDeviceInfo } from "../native/externalBrowser.js";
+
 const STORAGE_DEVICE_ID_KEY = "safegate.deviceId";
+const STORAGE_DEVICE_NAME_KEY = "safegate.deviceName";
 const STORAGE_REQUEST_MAP_KEY = "safegate.requestMap";
 const MAX_REQUEST_MAP_ENTRIES = 128;
 
 let memoryDeviceId = null;
+let memoryDeviceName = null;
 const memoryRequestMap = new Map();
 
 function readViteEnv(name) {
@@ -76,6 +80,93 @@ export function getOrCreateDeviceId() {
   }
 
   return generated;
+}
+
+export function sanitizeDeviceNameForCloud(rawName) {
+  if (typeof rawName !== "string") return null;
+  const cleaned = rawName.trim().replace(/\s{2,}/g, " ");
+  if (!cleaned || cleaned.length > 80) return null;
+  if (
+    cleaned.includes("@") ||
+    cleaned.includes("://") ||
+    cleaned.includes("?") ||
+    cleaned.includes("#")
+  ) {
+    return null;
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ._()+/-]{0,79}$/.test(cleaned)) {
+    return null;
+  }
+  return cleaned;
+}
+
+function detectWebHardwareLabel() {
+  const nav = globalThis.navigator;
+  if (!nav) return null;
+
+  const platform = String(nav.userAgentData?.platform || nav.platform || "").trim();
+  const isMobile = Boolean(nav.userAgentData?.mobile) || /Android/i.test(String(nav.userAgent || ""));
+
+  if (platform) {
+    const cleanPlatform = sanitizeDeviceNameForCloud(
+      isMobile && !/android/i.test(platform) ? `Mobile ${platform}` : platform
+    );
+    if (cleanPlatform) return cleanPlatform;
+  }
+
+  return isMobile ? "Android Browser" : "Web Browser";
+}
+
+export async function resolveDeviceName(overrides = {}) {
+  const explicit = sanitizeDeviceNameForCloud(overrides.deviceName);
+  if (explicit) return explicit;
+
+  if (memoryDeviceName) return memoryDeviceName;
+
+  try {
+    const stored = globalThis.localStorage?.getItem(STORAGE_DEVICE_NAME_KEY);
+    const cleanStored = sanitizeDeviceNameForCloud(stored);
+    if (cleanStored) {
+      memoryDeviceName = cleanStored;
+      return cleanStored;
+    }
+  } catch {
+    // Ignore storage unavailability
+  }
+
+  let detected = null;
+
+  const nativeInfo = await getNativeHardwareDeviceInfo().catch(() => null);
+  if (nativeInfo?.deviceName) {
+    detected = sanitizeDeviceNameForCloud(nativeInfo.deviceName);
+  }
+
+  if (!detected && globalThis.navigator?.userAgentData?.getHighEntropyValues) {
+    try {
+      const uaHints = await globalThis.navigator.userAgentData.getHighEntropyValues(["model", "platform"]);
+      const model = sanitizeDeviceNameForCloud(uaHints?.model);
+      if (model) {
+        detected = model;
+      }
+    } catch {
+      // Ignore UA-CH rejection
+    }
+  }
+
+  if (!detected) {
+    detected = detectWebHardwareLabel();
+  }
+
+  if (detected) {
+    memoryDeviceName = detected;
+    try {
+      globalThis.localStorage?.setItem(STORAGE_DEVICE_NAME_KEY, detected);
+    } catch {
+      // Ignore storage unavailability
+    }
+  }
+
+  return detected;
 }
 
 export function rememberRequestForFingerprint(fingerprint, requestId, decision) {
@@ -245,7 +336,7 @@ function sanitizeAction(rawAction, fallbackDecision) {
   }
 }
 
-export function buildPrivacySafeCloudPayload(result, deviceId) {
+export function buildPrivacySafeCloudPayload(result, deviceId, deviceName = null) {
   const requestId = String(result?.requestId || "").trim();
   const decision = String(result?.finalDecision || result?.decision || "HOLD").toUpperCase();
   const rawScore = result?.riskSummary?.score ?? result?.localVerification?.riskScore;
@@ -316,7 +407,9 @@ export function buildPrivacySafeCloudPayload(result, deviceId) {
     localVerification.urlInspection = result.localVerification.urlInspection;
   }
 
-  return {
+  const safeDeviceName = sanitizeDeviceNameForCloud(deviceName);
+
+  const payload = {
     requestId,
     deviceId,
     verificationStatus: result?.verificationStatus === "INCOMPLETE" ? "INCOMPLETE" : "COMPLETED",
@@ -334,6 +427,12 @@ export function buildPrivacySafeCloudPayload(result, deviceId) {
     layersExecuted,
     appVersion: "2.0.0"
   };
+
+  if (safeDeviceName) {
+    payload.deviceName = safeDeviceName;
+  }
+
+  return payload;
 }
 
 export async function createSignedProofToken(
@@ -408,7 +507,8 @@ export async function syncVerificationToCloud(rawUrl, result, overrides = {}) {
   }
 
   const deviceId = overrides.deviceId || getOrCreateDeviceId();
-  const payload = buildPrivacySafeCloudPayload(result, deviceId);
+  const deviceName = await resolveDeviceName(overrides);
+  const payload = buildPrivacySafeCloudPayload(result, deviceId, deviceName);
 
   try {
     const verificationToken = await createSignedProofToken(

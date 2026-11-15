@@ -60,7 +60,7 @@ function createSqliteMock() {
             return { changes: 1 };
           }
           if (sql.includes('INSERT INTO devices')) {
-            devices.set(args[0], { first: args[1], last: args[2] });
+            devices.set(args[0], { deviceName: args[1], first: args[2], last: args[3] });
             return { changes: 1 };
           }
           if (sql.includes('INSERT INTO consumed_proof_tokens')) {
@@ -99,30 +99,31 @@ function createSqliteMock() {
             events.set(rid, {
               request_id: args[0],
               device_id: args[1],
-              event_time: args[2],
-              decision: args[3],
-              score: args[4],
-              reasons_json: args[5],
+              device_name: args[2],
+              event_time: args[3],
+              decision: args[4],
+              score: args[5],
+              reasons_json: args[6],
               status: 'OPEN',
-              verification_status: args[6],
-              local_decision: args[7],
-              stage: args[8],
-              recommended_action: args[9],
-              destination_host: args[10],
-              registrable_domain: args[11],
-              protocol: args[12],
-              indicators_json: args[13],
-              security_checks_json: args[14],
-              url_inspection_json: args[15],
-              risk_level: args[16],
-              layers_executed_count: args[17],
-              zero_egress: args[18],
-              proof_jti: args[19],
-              payload_hash: args[20],
-              app_version: args[21],
+              verification_status: args[7],
+              local_decision: args[8],
+              stage: args[9],
+              recommended_action: args[10],
+              destination_host: args[11],
+              registrable_domain: args[12],
+              protocol: args[13],
+              indicators_json: args[14],
+              security_checks_json: args[15],
+              url_inspection_json: args[16],
+              risk_level: args[17],
+              layers_executed_count: args[18],
+              zero_egress: args[19],
+              proof_jti: args[20],
+              payload_hash: args[21],
+              app_version: args[22],
               operator_notes: null,
-              created_at: args[22],
-              updated_at: args[23]
+              created_at: args[23],
+              updated_at: args[24]
             });
             return { changes: 1 };
           }
@@ -175,6 +176,10 @@ function createSqliteMock() {
             if (sql.includes('device_id = ?')) {
               const val = filterParams[paramIndex++];
               rows = rows.filter(r => r.device_id === val);
+            }
+            if (sql.includes('device_name = ?')) {
+              const val = filterParams[paramIndex++];
+              rows = rows.filter(r => r.device_name === val);
             }
             if (sql.includes('status = ?')) {
               const val = filterParams[paramIndex++];
@@ -886,6 +891,7 @@ test('Two-Plane Auth enforces App-Only POST ingest with replay/privacy protectio
       const casePayload = {
         requestId: caseRequestId,
         deviceId: caseDeviceId,
+        deviceName: 'Vivo V25',
         verificationStatus: 'COMPLETED',
         localVerification: {
           decision: item.localDecision,
@@ -963,7 +969,39 @@ test('Two-Plane Auth enforces App-Only POST ingest with replay/privacy protectio
         `Expected 201 DB insert for ${item.label} (${item.decision}), got ${matrixInsert.status}: ${matrixInsert.text}`
       );
       assert.equal(db.events.has(caseRequestId), true);
+      assert.equal(db.events.get(caseRequestId).device_name, 'Vivo V25');
     }
+
+    // 16. Filter by hardware deviceName cleanly & reject email/PII in deviceName
+    const filteredByName = await sendHttpRequest(
+      port,
+      'GET',
+      '/api/v1/events?deviceName=Vivo%20V25',
+      { Authorization: `Bearer ${vaultBearerToken}` }
+    );
+    assert.equal(filteredByName.status, 200);
+    assert.equal(filteredByName.json.count, matrixCases.length);
+    assert.equal(filteredByName.json.events[0].deviceName, 'Vivo V25');
+
+    const badDeviceNameRes = await sendHttpRequest(
+      port,
+      'POST',
+      '/api/v1/events',
+      {
+        'X-SafeGate-App': 'com.safegate.app',
+        'X-SafeGate-App-Key': appIngestKey,
+        'Content-Type': 'application/json'
+      },
+      {
+        requestId: crypto.randomUUID(),
+        deviceId: 'sgdev-bad-name-1',
+        deviceName: 'Phone with email user@example.com',
+        finalDecision: 'HOLD',
+        score: 0
+      }
+    );
+    assert.equal(badDeviceNameRes.status, 400);
+    assert.equal(badDeviceNameRes.json.error.code, 'PRIVACY_VIOLATION_REJECTED');
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

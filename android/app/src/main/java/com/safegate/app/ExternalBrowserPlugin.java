@@ -184,4 +184,114 @@ public class ExternalBrowserPlugin extends Plugin {
         // 3. Fallback to first available external browser
         return candidates.get(0);
     }
+
+    @PluginMethod
+    public void getDeviceInfo(PluginCall call) {
+        String manufacturer = safeText(Build.MANUFACTURER);
+        String brand = safeText(Build.BRAND);
+        String model = safeText(Build.MODEL);
+        String marketName = readHardwareMarketName();
+
+        String deviceName = buildCleanDeviceName(manufacturer, brand, model, marketName);
+
+        JSObject result = new JSObject();
+        result.put("deviceName", deviceName);
+        result.put("manufacturer", manufacturer);
+        result.put("model", model);
+        call.resolve(result);
+    }
+
+    private String readHardwareMarketName() {
+        String[] sysPropKeys = new String[] {
+            "ro.vivo.market.name",
+            "ro.product.marketname",
+            "ro.oppo.market.name",
+            "ro.config.marketing_name",
+            "ro.vendor.oplus.market.name"
+        };
+        try {
+            Class<?> spClass = Class.forName("android.os.SystemProperties");
+            java.lang.reflect.Method getMethod = spClass.getMethod("get", String.class, String.class);
+            for (String key : sysPropKeys) {
+                Object raw = getMethod.invoke(null, key, "");
+                String val = sanitizeHardwareLabel(raw != null ? String.valueOf(raw) : "");
+                if (!TextUtils.isEmpty(val)) {
+                    return val;
+                }
+            }
+        } catch (Exception ignored) {
+            // OEM market name sysprop not readable on this OS build; fall back to Build.MANUFACTURER + Build.MODEL
+        }
+        return "";
+    }
+
+    private String buildCleanDeviceName(String manufacturer, String brand, String model, String marketName) {
+        String primaryVendor = !TextUtils.isEmpty(brand) ? brand : manufacturer;
+        String cleanVendor = formatVendorName(primaryVendor);
+        String cleanMarket = sanitizeHardwareLabel(marketName);
+        String cleanModel = sanitizeHardwareLabel(model);
+
+        String chosenModel = !TextUtils.isEmpty(cleanMarket) ? cleanMarket : cleanModel;
+        if (TextUtils.isEmpty(chosenModel)) {
+            return !TextUtils.isEmpty(cleanVendor) ? cleanVendor : "Android Device";
+        }
+
+        if (TextUtils.isEmpty(cleanVendor)) {
+            return clampHardwareName(chosenModel);
+        }
+
+        String lowerModel = chosenModel.toLowerCase(Locale.US);
+        String lowerVendor = cleanVendor.toLowerCase(Locale.US);
+        if (lowerModel.startsWith(lowerVendor)) {
+            return clampHardwareName(chosenModel);
+        }
+
+        return clampHardwareName(cleanVendor + " " + chosenModel);
+    }
+
+    private String formatVendorName(String rawVendor) {
+        String cleaned = sanitizeHardwareLabel(rawVendor);
+        if (TextUtils.isEmpty(cleaned)) {
+            return "";
+        }
+        if ("samsung".equalsIgnoreCase(cleaned)) return "Samsung";
+        if ("google".equalsIgnoreCase(cleaned)) return "Google";
+        if ("vivo".equalsIgnoreCase(cleaned)) return "Vivo";
+        if ("oneplus".equalsIgnoreCase(cleaned)) return "OnePlus";
+        if ("xiaomi".equalsIgnoreCase(cleaned)) return "Xiaomi";
+        if ("redmi".equalsIgnoreCase(cleaned)) return "Redmi";
+        if ("poco".equalsIgnoreCase(cleaned)) return "POCO";
+        if ("oppo".equalsIgnoreCase(cleaned)) return "OPPO";
+        if ("realme".equalsIgnoreCase(cleaned)) return "realme";
+        if ("motorola".equalsIgnoreCase(cleaned)) return "Motorola";
+        return Character.toUpperCase(cleaned.charAt(0)) + cleaned.substring(1);
+    }
+
+    private String safeText(String raw) {
+        return sanitizeHardwareLabel(raw);
+    }
+
+    private String sanitizeHardwareLabel(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if ((c >= 'A' && c <= 'Z') ||
+                (c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') ||
+                c == ' ' || c == '-' || c == '_' || c == '.' || c == '+' || c == '(' || c == ')') {
+                sb.append(c);
+            }
+        }
+        return sb.toString().trim().replaceAll("\\s{2,}", " ");
+    }
+
+    private String clampHardwareName(String value) {
+        if (TextUtils.isEmpty(value)) {
+            return "Android Device";
+        }
+        return value.length() > 80 ? value.substring(0, 80).trim() : value;
+    }
 }

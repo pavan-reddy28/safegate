@@ -514,9 +514,14 @@ export function App() {
       <main className="flex min-h-screen items-center justify-center bg-[#07090e] p-6">
         <div
           data-testid="home-locker-emblem"
-          className="flex h-24 w-24 items-center justify-center rounded-3xl border border-white/10 bg-[#0b0f17]"
+          className="flex flex-col items-center gap-4"
         >
-          <UrlLockerIcon variant="ready" className="h-14 w-14" />
+          <div className="flex h-24 w-24 items-center justify-center rounded-3xl border border-white/10 bg-[#0b0f17] shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
+            <UrlLockerIcon variant="ready" className="h-14 w-14" />
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-slate-100">
+            SafeGate
+          </h1>
         </div>
       </main>
     );

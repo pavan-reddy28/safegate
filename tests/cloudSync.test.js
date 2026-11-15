@@ -270,30 +270,31 @@ test("Real client offlineEngine + cloudSync matrix inserts 201 across all verdic
             events.set(args[0], {
               request_id: args[0],
               device_id: args[1],
-              event_time: args[2],
-              decision: args[3],
-              score: args[4],
-              reasons_json: args[5],
+              device_name: args[2],
+              event_time: args[3],
+              decision: args[4],
+              score: args[5],
+              reasons_json: args[6],
               status: "OPEN",
-              verification_status: args[6],
-              local_decision: args[7],
-              stage: args[8],
-              recommended_action: args[9],
-              destination_host: args[10],
-              registrable_domain: args[11],
-              protocol: args[12],
-              indicators_json: args[13],
-              security_checks_json: args[14],
-              url_inspection_json: args[15],
-              risk_level: args[16],
-              layers_executed_count: args[17],
-              zero_egress: args[18],
-              proof_jti: args[19],
-              payload_hash: args[20],
-              app_version: args[21],
+              verification_status: args[7],
+              local_decision: args[8],
+              stage: args[9],
+              recommended_action: args[10],
+              destination_host: args[11],
+              registrable_domain: args[12],
+              protocol: args[13],
+              indicators_json: args[14],
+              security_checks_json: args[15],
+              url_inspection_json: args[16],
+              risk_level: args[17],
+              layers_executed_count: args[18],
+              zero_egress: args[19],
+              proof_jti: args[20],
+              payload_hash: args[21],
+              app_version: args[22],
               operator_notes: null,
-              created_at: args[22],
-              updated_at: args[23]
+              created_at: args[23],
+              updated_at: args[24]
             });
             return { changes: 1 };
           }
@@ -370,10 +371,15 @@ test("Real client offlineEngine + cloudSync matrix inserts 201 across all verdic
       "https://example.org/docs/guide"
     ];
 
+    const { sanitizeDeviceNameForCloud } = await import("../src/security/cloudSync.js");
+    assert.equal(sanitizeDeviceNameForCloud("Vivo V25"), "Vivo V25");
+    assert.equal(sanitizeDeviceNameForCloud("Pavan's user@gmail.com"), null);
+    assert.equal(sanitizeDeviceNameForCloud("https://evil.com?otp=1"), null);
+
     let lastRequestId = null;
     for (const rawUrl of realUrls) {
       const localResult = analyzeUrlOffline(rawUrl);
-      const clientPayload = buildPrivacySafeCloudPayload(localResult, "sgdev-real-client-matrix-1");
+      const clientPayload = buildPrivacySafeCloudPayload(localResult, "sgdev-real-client-matrix-1", "Vivo V25");
       clientPayload.verificationToken = await createSignedProofToken(
         {
           rawUrl,
@@ -408,8 +414,16 @@ test("Real client offlineEngine + cloudSync matrix inserts 201 across all verdic
       lastRequestId = clientPayload.requestId;
     }
 
-    // Verify permanent hard DELETE (without ?archive=true) removes row completely from DB
+    // Verify GET returns original hardware deviceName alongside deviceId
     assert.ok(lastRequestId);
+    const getRes = await request("GET", `/api/v1/events/${lastRequestId}`, {
+      Authorization: `Bearer ${vaultToken}`
+    });
+    assert.equal(getRes.status, 200);
+    assert.equal(getRes.json.event.deviceId, "sgdev-real-client-matrix-1");
+    assert.equal(getRes.json.event.deviceName, "Vivo V25");
+
+    // Verify permanent hard DELETE (without ?archive=true) removes row completely from DB
     const delRes = await request("DELETE", `/api/v1/events/${lastRequestId}`, {
       Authorization: `Bearer ${vaultToken}`
     });

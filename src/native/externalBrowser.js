@@ -43,3 +43,22 @@ export async function openInExternalBrowser(targetUrl) {
   window.location.assign(url);
   return { opened: true, packageName: "web" };
 }
+
+export async function getNativeHardwareDeviceInfo() {
+  if (!Capacitor.isNativePlatform()) {
+    return null;
+  }
+  try {
+    const info = await ExternalBrowser.getDeviceInfo();
+    if (info && typeof info.deviceName === "string" && info.deviceName.trim()) {
+      return {
+        deviceName: info.deviceName.trim(),
+        manufacturer: info.manufacturer || "",
+        model: info.model || ""
+      };
+    }
+  } catch {
+    // Ignore native plugin fallback errors
+  }
+  return null;
+}

@@ -81,6 +81,7 @@ const FORBIDDEN_PRIVACY_KEYS = new Set([
 const ALLOWED_POST_KEYS = new Set([
   'requestId',
   'deviceId',
+  'deviceName',
   'eventTime',
   'decision',
   'score',
@@ -102,6 +103,7 @@ const ALLOWED_POST_KEYS = new Set([
 ]);
 
 const ALLOWED_PATCH_KEYS = new Set([
+  'deviceName',
   'status',
   'decision',
   'localDecision',
@@ -348,6 +350,29 @@ function hasControlChars(text) {
   return false;
 }
 
+function sanitizeDeviceName(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().replace(/\s{2,}/g, ' ');
+  if (!normalized || normalized.length > 80 || hasControlChars(normalized)) {
+    return undefined;
+  }
+  if (
+    normalized.includes('@') ||
+    normalized.includes('://') ||
+    normalized.includes('?') ||
+    normalized.includes('#') ||
+    !/^[A-Za-z0-9][A-Za-z0-9 ._()+/-]{0,79}$/.test(normalized)
+  ) {
+    return undefined;
+  }
+  return normalized;
+}
+
 function createApp({
   db,
   config = {},
@@ -429,6 +454,7 @@ function createApp({
     return {
       requestId: row.request_id,
       deviceId: row.device_id,
+      deviceName: row.device_name || null,
       eventTime: row.event_time,
       decision: row.decision,
       score: row.score,
@@ -866,6 +892,7 @@ function createApp({
     INSERT INTO security_events (
       request_id,
       device_id,
+      device_name,
       event_time,
       decision,
       score,
@@ -891,19 +918,21 @@ function createApp({
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
   `);
 
   const upsertDeviceStmt = db.prepare(`
     INSERT INTO devices (
       device_id,
+      device_name,
       status,
       first_seen_at,
       last_seen_at
     )
-    VALUES (?, 'ACTIVE', ?, ?)
+    VALUES (?, ?, 'ACTIVE', ?, ?)
     ON CONFLICT(device_id)
     DO UPDATE SET
+      device_name = COALESCE(excluded.device_name, devices.device_name),
       status = 'ACTIVE',
       last_seen_at = excluded.last_seen_at
   `);
@@ -958,6 +987,11 @@ function createApp({
 
       if (!isValidId(deviceId)) {
         return sendError(res, 400, 'INVALID_DEVICE_ID', 'A valid deviceId is required', req.requestId);
+      }
+
+      const deviceName = sanitizeDeviceName(body.deviceName);
+      if (deviceName === undefined) {
+        return sendError(res, 400, 'INVALID_DEVICE_NAME', 'Invalid deviceName format', req.requestId);
       }
 
       const deviceLimit = consumeBucket(deviceRateBuckets, deviceId, DEVICE_RATE_MAX_REQUESTS, Date.now());
@@ -1129,7 +1163,7 @@ function createApp({
       const nowEpochSec = Math.floor(Date.now() / 1000);
 
       const transaction = db.transaction(() => {
-        upsertDeviceStmt.run(deviceId, now, now);
+        upsertDeviceStmt.run(deviceId, deviceName, now, now);
 
         insertProofTokenStmt.run(
           proofResult.jti,
@@ -1143,6 +1177,7 @@ function createApp({
         insertEventStmt.run(
           requestId,
           deviceId,
+          deviceName,
           normalizedEventTime,
           decision,
           score,
@@ -1229,6 +1264,7 @@ function createApp({
   const EVENT_SELECT_COLUMNS = `
     request_id,
     device_id,
+    device_name,
     event_time,
     decision,
     score,
@@ -1267,12 +1303,21 @@ function createApp({
   app.get('/api/v1/events', authenticateOperatorVault, (req, res, next) => {
     try {
       const deviceId = req.query.deviceId;
+      const deviceNameQuery = req.query.deviceName;
       const status = req.query.status;
       const decision = req.query.decision;
       const registrableDomain = req.query.registrableDomain;
 
       if (deviceId !== undefined && !isValidId(deviceId)) {
         return sendError(res, 400, 'INVALID_DEVICE_ID', 'Invalid deviceId', req.requestId);
+      }
+
+      let safeDeviceNameFilter = null;
+      if (deviceNameQuery !== undefined) {
+        safeDeviceNameFilter = sanitizeDeviceName(deviceNameQuery);
+        if (!safeDeviceNameFilter) {
+          return sendError(res, 400, 'INVALID_DEVICE_NAME', 'Invalid deviceName filter', req.requestId);
+        }
       }
 
       if (status !== undefined && !VALID_STATUSES.has(status)) {
@@ -1310,6 +1355,11 @@ function createApp({
       if (deviceId !== undefined) {
         conditions.push('device_id = ?');
         parameters.push(deviceId);
+      }
+
+      if (safeDeviceNameFilter !== null) {
+        conditions.push('device_name = ?');
+        parameters.push(safeDeviceNameFilter);
       }
 
       if (status !== undefined) {
@@ -1416,6 +1466,15 @@ function createApp({
 
       const setClauses = [];
       const values = [];
+
+      if (body.deviceName !== undefined) {
+        const nextDeviceName = sanitizeDeviceName(body.deviceName);
+        if (nextDeviceName === undefined) {
+          return sendError(res, 400, 'INVALID_DEVICE_NAME', 'Invalid deviceName format', req.requestId);
+        }
+        setClauses.push('device_name = ?');
+        values.push(nextDeviceName);
+      }
 
       if (body.status !== undefined) {
         if (!VALID_STATUSES.has(body.status)) {
