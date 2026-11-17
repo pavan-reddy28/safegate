@@ -16,6 +16,8 @@ public class MainActivity extends BridgeActivity {
 
     @SuppressWarnings("deprecation")
     private void hardenWebView() {
+        WebView.setWebContentsDebuggingEnabled(false);
+
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(false);
         cookieManager.removeAllCookies(null);
@@ -25,6 +27,8 @@ public class MainActivity extends BridgeActivity {
         }
 
         WebView webView = getBridge().getWebView();
+        webView.setFilterTouchesWhenObscured(true);
+
         WebSettings settings = webView.getSettings();
         settings.setSaveFormData(false);
         settings.setGeolocationEnabled(false);
