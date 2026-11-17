@@ -56,17 +56,47 @@ jobs:
           fi
           npx cap sync android
 
-      - name: Accept Android SDK licenses & build Debug APK
+      - name: Prepare Release Signing Keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+        run: |
+          KS_PATH="${{ runner.temp }}/safegate-release.jks"
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASS" ] && [ -n "$ANDROID_KEY_ALIAS" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KS_PATH"
+            KEY_PASS="${ANDROID_KEY_PASS:-$ANDROID_KEYSTORE_PASS}"
+            echo "SAFEGATE_KEYSTORE_PATH=$KS_PATH" >> "$GITHUB_ENV"
+            echo "SAFEGATE_KEYSTORE_PASS=$ANDROID_KEYSTORE_PASS" >> "$GITHUB_ENV"
+            echo "SAFEGATE_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "SAFEGATE_KEY_PASS=$KEY_PASS" >> "$GITHUB_ENV"
+          else
+            RAND_PASS="$(openssl rand -hex 24)"
+            keytool -genkeypair -v -keystore "$KS_PATH" -storepass "$RAND_PASS" -keypass "$RAND_PASS" -alias safegate-release -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=SafeGate, O=SafeGate Security"
+            echo "::warning::Built with a runner-generated release keystore. Add ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASS, ANDROID_KEY_ALIAS, ANDROID_KEY_PASS in GitHub Secrets for in-place upgrades across future releases."
+            echo "SAFEGATE_KEYSTORE_PATH=$KS_PATH" >> "$GITHUB_ENV"
+            echo "SAFEGATE_KEYSTORE_PASS=$RAND_PASS" >> "$GITHUB_ENV"
+            echo "SAFEGATE_KEY_ALIAS=safegate-release" >> "$GITHUB_ENV"
+            echo "SAFEGATE_KEY_PASS=$RAND_PASS" >> "$GITHUB_ENV"
+          fi
+
+      - name: Accept Android SDK licenses & build Signed Release APK
         working-directory: android
         run: |
           if [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
             yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           fi
           chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
-      - name: Upload SafeGate Debug APK Artifact
+      - name: Verify Signed Release APK exists
+        run: |
+          test -f android/app/build/outputs/apk/release/app-release.apk
+          ls -lh android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload SafeGate Release APK Artifact
         uses: actions/upload-artifact@v5
         with:
-          name: SafeGate-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: SafeGate-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
